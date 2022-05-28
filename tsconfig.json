@@ -1,11 +1,16 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "ES2022",
     "lib": [
       "dom",
       "dom.iterable",
       "esnext"
     ],
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false,
+    "useDefineForClassFields": true,
+
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
