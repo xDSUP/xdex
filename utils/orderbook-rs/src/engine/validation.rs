@@ -45,7 +45,12 @@ impl OrderRequestValidator {
                 qty,
                 order_creator,
                 ts: _ts,
-            } => self.validate_market(order_asset.clone(), price_asset.clone(), *qty, order_creator.clone()),
+            } => self.validate_market(
+                order_asset.clone(),
+                price_asset.clone(),
+                *qty,
+                order_creator.clone(),
+            ),
 
             OrderRequest::NewLimitOrder {
                 order_asset,
@@ -55,7 +60,13 @@ impl OrderRequestValidator {
                 qty,
                 order_creator,
                 ts: _ts,
-            } => self.validate_limit(order_asset.clone(), price_asset.clone(), *price, *qty, order_creator.clone()),
+            } => self.validate_limit(
+                order_asset.clone(),
+                price_asset.clone(),
+                *price,
+                *qty,
+                order_creator.clone(),
+            ),
 
             OrderRequest::AmendOrder {
                 id,
@@ -137,7 +148,7 @@ impl OrderRequestValidator {
             return Err(ERR_BAD_PRICE_VALUE);
         }
 
-        if qty <= 0{
+        if qty <= 0 {
             return Err(ERR_BAD_QUANTITY_VALUE);
         }
 

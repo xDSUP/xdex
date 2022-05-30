@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use super::domain::OrderSide;
 
 #[derive(Debug)]
-pub enum OrderRequest{
+pub enum OrderRequest {
     NewMarketOrder {
         order_asset: String,
         price_asset: String,
@@ -48,8 +48,7 @@ pub fn new_market_order_request(
     qty: u128,
     order_creator: String,
     ts: u64,
-) -> OrderRequest
-{
+) -> OrderRequest {
     OrderRequest::NewMarketOrder {
         order_asset,
         price_asset,
@@ -69,8 +68,7 @@ pub fn new_limit_order_request(
     qty: u128,
     order_creator: String,
     ts: u64,
-) -> OrderRequest
-{
+) -> OrderRequest {
     OrderRequest::NewLimitOrder {
         order_asset,
         price_asset,
@@ -92,8 +90,7 @@ pub fn amend_order_request(
     price: f64,
     qty: u128,
     ts: u64,
-) -> OrderRequest
-{
+) -> OrderRequest {
     OrderRequest::AmendOrder {
         id,
         side,
@@ -104,7 +101,6 @@ pub fn amend_order_request(
 }
 
 /// Create request for cancelling active limit order
-pub fn limit_order_cancel_request(order_id: u64, side: OrderSide) -> OrderRequest
-{
+pub fn limit_order_cancel_request(order_id: u64, side: OrderSide) -> OrderRequest {
     OrderRequest::CancelOrder { id: order_id, side }
 }

@@ -1,8 +1,8 @@
 use crate::account::TokenAccount;
 use crate::token::TokenId;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LookupMap};
-use near_sdk::{Balance};
+use near_sdk::collections::LookupMap;
+use near_sdk::Balance;
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct TokenWallet {
@@ -20,10 +20,10 @@ impl TokenWallet {
 
     pub fn get_balances(&self, token_ids: Vec<TokenId>) -> Vec<(TokenId, Balance)> {
         let mut array: Vec<(TokenId, Balance)> = Vec::new();
-        for token in token_ids{
+        for token in token_ids {
             let balance = match self.get_account(&token) {
                 Some(b) => b.balance,
-                None => 0u128
+                None => 0u128,
             };
             array.push((token, balance));
         }

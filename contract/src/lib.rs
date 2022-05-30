@@ -1,19 +1,19 @@
 mod account;
 mod request;
 
+mod ballot;
 mod token;
 mod wallet;
-mod ballot;
 
 use crate::account::TokenAccount;
 use crate::token::{Token, TokenId};
 use crate::wallet::TokenWallet;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LookupMap, Vector};
-use near_sdk::json_types::U128;
-use near_sdk::{env, ext_contract, near_bindgen, AccountId, Balance, Promise, PromiseResult};
 use near_sdk::env::panic;
-use orderbook::{Failed, Orderbook, OrderIndex, orders, OrderSide, Success};
+use near_sdk::json_types::U128;
+use near_sdk::{env, near_bindgen, AccountId, Balance, Promise};
+use orderbook::{orders, Failed, OrderIndex, OrderSide, Orderbook, Success};
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -92,7 +92,13 @@ impl Contract {
         token_id: Option<TokenId>,
         amount: U128,
     ) {
-        println!("Перепожу {} {} от {} к {}", amount.0, token_id.clone().unwrap_or(self.get_standard_token()), owner_id, new_owner_id);
+        println!(
+            "Перепожу {} {} от {} к {}",
+            amount.0,
+            token_id.clone().unwrap_or(self.get_standard_token()),
+            owner_id,
+            new_owner_id
+        );
         let amount = amount.into();
         if amount == 0 {
             env::panic(b"Can't transfer 0 tokens");
@@ -148,10 +154,14 @@ impl Contract {
         self.get_account(&owner_id, token_id).balance.into()
     }
 
-   /// Returns balance of the `owner_id` account.
-   pub fn get_balances(&self, owner_id: AccountId, token_ids: Vec<TokenId>) -> Vec<(TokenId, Balance)> {
-       self.get_wallet(&owner_id).get_balances(token_ids)
-   }
+    /// Returns balance of the `owner_id` account.
+    pub fn get_balances(
+        &self,
+        owner_id: AccountId,
+        token_ids: Vec<TokenId>,
+    ) -> Vec<(TokenId, Balance)> {
+        self.get_wallet(&owner_id).get_balances(token_ids)
+    }
 
     /// Returns current allowance of `escrow_account_id` for the account of `owner_id`.
     ///
@@ -206,7 +216,7 @@ impl Contract {
         self.order_books.insert(&token_id.clone(), &orderbook);
     }
 
-    fn get_standard_token(&self) -> String{
+    fn get_standard_token(&self) -> String {
         "XDHO".to_string()
     }
 
@@ -232,8 +242,10 @@ impl Contract {
         account: &TokenAccount,
         token_id: &Option<TokenId>,
     ) {
-        self.get_wallet(owner_id)
-            .set_account(&token_id.clone().unwrap_or(self.get_standard_token()), &account)
+        self.get_wallet(owner_id).set_account(
+            &token_id.clone().unwrap_or(self.get_standard_token()),
+            &account,
+        )
     }
 }
 
@@ -249,44 +261,40 @@ fn get_current_time() -> u64 {
     return env::block_timestamp();
 }
 
-#[ext_contract(ext_this_contract)]
-pub trait ExtThis {
-    fn transfer(&mut self, new_owner_id: AccountId, token_id: Option<TokenId>, amount: U128);
-    fn post_transfer(&mut self, token_id: TokenId, price: f64, quantity: u128, side: String);
-}
-
 #[near_bindgen]
 impl Contract {
     pub fn new_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128, side: String) {
         let token = match parse_side(side.as_str()).unwrap() {
             OrderSide::Ask => self.get_standard_token(),
-            OrderSide::Bid => token_id.clone()
+            OrderSide::Bid => token_id.clone(),
         };
-        println!("Acc_id {}, signer: {}, token: {}",  env::current_account_id(), env::predecessor_account_id(), token_id);
-        ext_this_contract::transfer(
+        println!(
+            "Acc_id {}, signer: {}, token: {}",
+            env::current_account_id(),
+            env::predecessor_account_id(),
+            token_id
+        );
+        self.transfer_from(
+            env::predecessor_account_id(),
             env::current_account_id(),
             Option::Some(token),
             U128(quantity),
-            &env::current_account_id(),
-            0,
-            250000000000000,
-        )
-            .then(ext_this_contract::post_transfer(
-                token_id,
-                price,
-                quantity,
-                side,
-                &env::current_account_id(),
-                0,
-                250000000000000,
-            ));
+        );
+
+        self.post_transfer(token_id, price, quantity, side)
     }
 
-    pub fn cancel_limit_order(&mut self, token_id: TokenId, id: u64, side: String) -> Vec<Result<Success, Failed>> {
-
+    pub fn cancel_limit_order(
+        &mut self,
+        token_id: TokenId,
+        id: u64,
+        side: String,
+    ) -> Vec<Result<Success, Failed>> {
         let order = orders::limit_order_cancel_request(id, parse_side(&side).unwrap());
         let mut order_book = self.order_books.get(&token_id).unwrap();
-        order_book.process_order(order)
+        let res = order_book.process_order(order);
+        self.order_books.insert(&token_id, &order_book);
+        res
     }
 
     pub fn get_ask_orders(&self, token_id: TokenId) -> Vec<OrderIndex> {
@@ -308,33 +316,23 @@ impl Contract {
         }
     }
 
-    pub fn post_transfer(&mut self, token_id: TokenId, price: f64, quantity: u128, side: String) {
-        self._only_owner_predecessor();
-        assert_eq!(env::promise_results_count(), 1);
-        match env::promise_result(0) {
-            PromiseResult::Successful(_) => {
-                env::log(b"Token Transfer Successful.");
+    fn post_transfer(&mut self, token_id: TokenId, price: f64, quantity: u128, side: String) {
+        env::log(b"Token Transfer Successful.");
+        let order = orders::new_limit_order_request(
+            token_id.clone(),
+            self.get_standard_token(),
+            parse_side(&side).unwrap(),
+            price,
+            quantity,
+            env::signer_account_id(),
+            get_current_time(),
+        );
 
-                let order = orders::new_limit_order_request(
-                    token_id.clone(),
-                    self.get_standard_token(),
-                    parse_side(&side).unwrap(),
-                    price,
-                    quantity,
-                    env::signer_account_id(),
-                    get_current_time(),
-                );
+        let mut order_book = self.order_books.get(&token_id).unwrap();
+        let res = order_book.process_order(order);
+        self.order_books.insert(&token_id, &order_book);
 
-                let mut order_book = self.order_books.get(&token_id).unwrap();
-                let res = order_book.process_order(order);
-
-                self.process_orderbook_result(token_id,res)
-            }
-            PromiseResult::Failed => {
-                env::panic(b"(post_transfer) The promise failed. See receipt failures.")
-            }
-            PromiseResult::NotReady => env::panic(b"The promise was not ready."),
-        };
+        self.process_orderbook_result(token_id, res);
     }
 
     fn process_orderbook_result(
@@ -400,20 +398,8 @@ impl Contract {
                 Success::Cancelled { id: _, ts: _ } => {}
             };
         }
-
         order
     }
-
-    //fn transfer(&mut self, token_account: String, order_creator: String, amount: u128) {
-    //    self._only_owner_predecessor();
-    //    ext_fungible_token::transfer(
-    //        order_creator,
-    //        U128(amount),
-    //        &token_account,
-    //        TRANSFER_FROM_NEAR_COST,
-    //        SINGLE_CALL_GAS,
-    //    );
-    //}
 
     fn _only_owner_predecessor(&mut self) {
         assert_eq!(
@@ -427,11 +413,11 @@ impl Contract {
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
-    use std::borrow::Borrow;
     use crate::{Contract, Token};
     use near_sdk::json_types::U128;
     use near_sdk::{env, AccountId, Gas, MockedBlockchain};
     use near_sdk::{testing_env, VMContext};
+    use std::borrow::Borrow;
 
     use super::*;
     fn standart_token() -> Token {
@@ -495,7 +481,10 @@ mod tests {
         testing_env!(context);
 
         let mut contract = Contract::new(carol());
-        assert_eq!(contract.get_balance(carol(), None).0, standart_token().supply);
+        assert_eq!(
+            contract.get_balance(carol(), None).0,
+            standart_token().supply
+        );
 
         contract.add_token(test_token());
         let balance = contract
@@ -540,7 +529,8 @@ mod tests {
         let balance = contract
             .get_balance(bob(), Option::Some(standart_token().token_id))
             .0;
-        let account = contract.get_wallet(&bob())
+        let account = contract
+            .get_wallet(&bob())
             .get_account(&standart_token().token_id);
 
         assert_eq!(account.unwrap().balance, 156u128);
@@ -570,7 +560,7 @@ mod tests {
         catch_unwind_silent(move || {
             contract.set_allowance(carol(), None, (total_supply / 2).into());
         })
-            .unwrap_err();
+        .unwrap_err();
     }
 
     #[test]
@@ -589,15 +579,28 @@ mod tests {
         let allowance = total_supply / 3;
         let transfer_amount = allowance / 3;
         contract.set_allowance(bob(), Some(test_token().token_id), allowance.into());
-        assert_eq!(contract.get_allowance(carol(), bob(), Some(test_token().token_id)).0, allowance);
+        assert_eq!(
+            contract
+                .get_allowance(carol(), bob(), Some(test_token().token_id))
+                .0,
+            allowance
+        );
         // Acting as bob now
         testing_env!(get_context(bob()));
-        contract.transfer_from(carol(), alice(), Some(test_token().token_id), transfer_amount.into());
+        contract.transfer_from(
+            carol(),
+            alice(),
+            Some(test_token().token_id),
+            transfer_amount.into(),
+        );
         assert_eq!(
             contract.get_balance(carol(), Some(test_token().token_id)).0,
             total_supply - transfer_amount
         );
-        assert_eq!(contract.get_balance(alice(), Some(test_token().token_id)).0, transfer_amount);
+        assert_eq!(
+            contract.get_balance(alice(), Some(test_token().token_id)).0,
+            transfer_amount
+        );
         assert_eq!(
             contract.get_allowance(carol(), bob(), None).0,
             allowance - transfer_amount
@@ -629,10 +632,19 @@ mod tests {
         );
     }
 
-    fn print_all_balances(contract: &Contract, account: AccountId){
-        for (token, balance) in contract.get_balances(account.clone(), [standart_token().token_id, test_token().token_id].to_vec()) {
+    fn print_all_balances(contract: &Contract, account: AccountId) {
+        for (token, balance) in contract.get_balances(
+            account.clone(),
+            [standart_token().token_id, test_token().token_id].to_vec(),
+        ) {
             println!("Acc:{} token: {} balance: {}", account, token, balance);
         }
+    }
+
+    fn init_contract_with_tokens_and_limit_bids() -> Contract{
+        let mut contract = init_contract_with_tokens();
+
+        contract
     }
 
     #[test]
@@ -647,19 +659,16 @@ mod tests {
         assert_eq!(spread[0], 0.0);
         assert_eq!(spread[1], 0.0);
 
-        print_all_balances(contract.borrow(), carol());
-
         // Ask Order
         let res = contract.new_limit_order(test_token().token_id, 1.25, 2, "Ask".to_string());
-        // let res1 = contract.get_ask_orders();
-        println!("Ask Result: {:?}", res);
-        print_all_balances(contract.borrow(), carol());
-        print_all_balances(contract.borrow(), alice());
 
         // Bid Order
-        let res2 = contract.new_limit_order(test_token().token_id, 1.22, 1, "Bid".to_string());
-        // let res3 = contract.get_bid_orders();
-        println!("Bid Result: {:?}", res2);
+        let res2 = contract.new_limit_order(test_token().token_id, 1.22, 100, "Bid".to_string());
+
+        assert_eq!(contract.get_balance(alice(), Some(standart_token().token_id)).0, 2u128);
+        assert_eq!(contract.get_balance(alice(), Some(test_token().token_id)).0, 100u128);
+        assert_eq!(contract.get_balance(carol(), Some(standart_token().token_id)).0, 99999999998u128);
+        assert_eq!(contract.get_balance(carol(), Some(test_token().token_id)).0, 9900u128);
 
         // Currrent Spread
         let spread = contract.get_current_spread(test_token().token_id);
@@ -668,4 +677,3 @@ mod tests {
         assert_eq!(spread[1], 1.22);
     }
 }
-

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use super::domain::{Order, OrderSide, OrderType};
-use super::order_queues::{OrderQueue};
+use super::order_queues::OrderQueue;
 use super::orders::OrderRequest;
 use super::sequence;
 use super::validation::OrderRequestValidator;
@@ -568,8 +568,6 @@ mod test {
 
     use super::super::orders;
     use super::*;
-
-
 
     #[test]
     fn cancel_nonexisting() {

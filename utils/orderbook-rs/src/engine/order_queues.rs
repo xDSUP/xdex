@@ -208,8 +208,8 @@ impl<T> OrderQueue<T> {
 
 #[cfg(test)]
 mod test {
-    use near_sdk::{AccountId, Gas, testing_env, VMContext, MockedBlockchain};
     use super::*;
+    use near_sdk::{testing_env, AccountId, Gas, MockedBlockchain, VMContext};
 
     #[derive(Debug, Eq, PartialEq)]
     struct TestOrder {
@@ -252,8 +252,10 @@ mod test {
     }
 
     fn get_current_time() -> u64 {
-        use std::time::{SystemTime};
-        let duration_since_epoch = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        use std::time::SystemTime;
+        let duration_since_epoch = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
         let timestamp_nanos = duration_since_epoch.as_nanos(); // u128
         timestamp_nanos as u64
     }
@@ -261,7 +263,13 @@ mod test {
     fn get_queue_bids() -> OrderQueue<TestOrder> {
         let mut bid_queue = get_queue_empty(OrderSide::Bid);
 
-        assert!(bid_queue.insert(1, 1.01, 2, get_current_time(), TestOrder { name: "low bid" },));
+        assert!(bid_queue.insert(
+            1,
+            1.01,
+            2,
+            get_current_time(),
+            TestOrder { name: "low bid" },
+        ));
         assert!(bid_queue.insert(
             2,
             1.02,
@@ -347,8 +355,8 @@ mod test {
             index1.quantity,
             index1.timestamp,
             TestOrder {
-                name: "high bid first"
-            }
+                name: "high bid first",
+            },
         );
         bid_queue.insert(
             index2.id,
@@ -356,8 +364,8 @@ mod test {
             index2.quantity,
             index2.timestamp,
             TestOrder {
-                name: "high bid second"
-            }
+                name: "high bid second",
+            },
         );
         bid_queue.insert(
             4,
@@ -365,17 +373,15 @@ mod test {
             index2.quantity,
             get_current_time(),
             TestOrder {
-                name: "low bid first"
-            }
+                name: "low bid first",
+            },
         );
         bid_queue.insert(
             5,
             1.1,
             index2.quantity,
             get_current_time(),
-            TestOrder {
-                name: "low bid 11"
-            }
+            TestOrder { name: "low bid 11" },
         );
         assert_eq!(bid_queue.peek().unwrap().name, "high bid first");
     }
