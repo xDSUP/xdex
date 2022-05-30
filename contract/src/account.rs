@@ -1,7 +1,6 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{AccountId, Balance, env};
 use near_sdk::collections::LookupMap;
-
+use near_sdk::{env, AccountId, Balance};
 
 /// Contains balance and allowances information for one account.
 #[derive(BorshDeserialize, BorshSerialize)]

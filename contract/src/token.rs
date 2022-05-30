@@ -14,7 +14,7 @@ pub struct TokenMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, BorshDeserialize, BorshSerialize)]
 #[serde(crate = "near_sdk::serde")]
-pub struct Token{
+pub struct Token {
     pub token_id: TokenId,
     pub owner_id: AccountId,
     pub supply: Balance,
