@@ -107,6 +107,14 @@ impl Orderbook {
         }
     }
 
+    //pub fn get_orders(&mut self, creator_id: AccountId) {
+    //    if let Some(idx_queue) = self.idx_queue.take() {
+    //        let mut active_orders = idx_queue;
+    //        active_orders.retain(|order_ptr| &order_ptr.;
+    //        active_orders.));
+    //    }
+            //}
+
     pub fn process_order(&mut self, order: OrderRequest) -> OrderProcessingResult {
         // processing result accumulator
         let mut proc_result: OrderProcessingResult = vec![];
@@ -182,8 +190,9 @@ impl Orderbook {
                 price,
                 qty,
                 ts,
+                order_creator,
             } => {
-                self.process_order_amend(&mut proc_result, id, side, price, qty, ts);
+                self.process_order_amend(&mut proc_result, id, side, price, qty, order_creator, ts);
             }
 
             OrderRequest::CancelOrder { id, side } => {
@@ -310,7 +319,8 @@ impl Orderbook {
                         ts,
                     );
                 }
-            } else {
+            }
+            else {
                 // just insert new order in queue
                 self.store_new_limit_order(
                     results,
@@ -319,11 +329,13 @@ impl Orderbook {
                     price_asset,
                     side,
                     price,
+                    order_creator,
                     qty,
                     ts,
                 );
             }
-        } else {
+        }
+        else {
             self.store_new_limit_order(
                 results,
                 order_id,
@@ -331,6 +343,7 @@ impl Orderbook {
                 price_asset,
                 side,
                 price,
+                order_creator,
                 qty,
                 ts,
             );
@@ -344,6 +357,7 @@ impl Orderbook {
         side: OrderSide,
         price: f64,
         qty: u128,
+        order_creator: String,
         ts: u64,
     ) {
         let order_queue = match side {
@@ -363,6 +377,7 @@ impl Orderbook {
                 side,
                 price,
                 qty,
+                order_creator,
             },
         ) {
             results.push(Ok(Success::Amended {
@@ -407,6 +422,7 @@ impl Orderbook {
         price_asset: String,
         side: OrderSide,
         price: f64,
+        order_creator: String,
         qty: u128,
         ts: u64,
     ) {
@@ -426,6 +442,7 @@ impl Orderbook {
                 side,
                 price,
                 qty,
+                order_creator
             },
         ) {
             results.push(Err(Failed::DuplicateOrderID(order_id)))
@@ -444,12 +461,11 @@ impl Orderbook {
         qty: u128,
         order_creator: &str,
     ) -> bool {
-        // real processing time
+        // время фиктического выполнения
         let deal_time = get_current_time();
 
-        // match immediately
         if qty < opposite_order.qty {
-            // fill new limit and modify opposite limit
+            // Новый ордер больше существующего
 
             // report filled new order
             results.push(Ok(Success::Filled {
@@ -469,7 +485,7 @@ impl Orderbook {
                 order_type: OrderType::Limit,
                 price: opposite_order.price,
                 qty,
-                order_creator: order_creator.to_string(),
+                order_creator: opposite_order.order_creator.clone(),
                 ts: deal_time,
             }));
 
@@ -486,9 +502,11 @@ impl Orderbook {
                     side: opposite_order.side,
                     price: opposite_order.price,
                     qty: opposite_order.qty - qty,
+                    order_creator: opposite_order.order_creator.clone()
                 });
             }
-        } else if qty > opposite_order.qty {
+        }
+        else if qty > opposite_order.qty {
             // partially fill new limit order, fill opposite limit and notify to process the rest
 
             // report new order partially filled
@@ -509,7 +527,7 @@ impl Orderbook {
                 order_type: OrderType::Limit,
                 price: opposite_order.price,
                 qty: opposite_order.qty,
-                order_creator: order_creator.to_string(),
+                order_creator: opposite_order.order_creator.clone(),
                 ts: deal_time,
             }));
 
@@ -525,9 +543,8 @@ impl Orderbook {
             // matching incomplete
             return false;
         } else {
-            // orders exactly match -> fill both and remove old limit
+            // Ордера полностью совпадают
 
-            // report filled new order
             results.push(Ok(Success::Filled {
                 order_id,
                 side,
@@ -537,14 +554,13 @@ impl Orderbook {
                 order_creator: order_creator.to_string(),
                 ts: deal_time,
             }));
-            // report filled opposite limit order
             results.push(Ok(Success::Filled {
                 order_id: opposite_order.order_id,
                 side: opposite_order.side,
                 order_type: OrderType::Limit,
                 price: opposite_order.price,
+                order_creator: opposite_order.order_creator.clone(),
                 qty,
-                order_creator: order_creator.to_string(),
                 ts: deal_time,
             }));
 

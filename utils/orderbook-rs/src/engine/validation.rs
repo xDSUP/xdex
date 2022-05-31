@@ -74,6 +74,7 @@ impl OrderRequestValidator {
                 side: _side,
                 qty,
                 ts: _ts,
+                order_creator: _,
             } => self.validate_amend(*id, *price, *qty),
 
             OrderRequest::CancelOrder { id, side: _side } => self.validate_cancel(*id),

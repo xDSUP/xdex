@@ -8,4 +8,5 @@ serde = { version = "*", features = ["derive"] }
 borsh = "*"
 near-sdk = "3.1.0"
 float-cmp = "0.8.0"
-priority-queue = "1.2.2"
+
+

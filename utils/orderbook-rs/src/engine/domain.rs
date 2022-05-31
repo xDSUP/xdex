@@ -24,10 +24,17 @@ pub struct Order {
     pub side: OrderSide,
     pub price: f64,
     pub qty: u128,
+    pub order_creator: String,
 }
 
-#[derive(Eq, PartialEq, Debug, Copy, Clone, Serialize)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone, BorshDeserialize, BorshSerialize, Serialize)]
 pub enum OrderType {
     Market,
     Limit,
+}
+
+impl Default for OrderType {
+    fn default() -> Self {
+        OrderType::Market
+    }
 }

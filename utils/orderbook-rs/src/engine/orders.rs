@@ -29,6 +29,7 @@ pub enum OrderRequest {
         price: f64,
         qty: u128,
         ts: u64,
+        order_creator: String,
     },
 
     CancelOrder {
@@ -90,6 +91,7 @@ pub fn amend_order_request(
     price: f64,
     qty: u128,
     ts: u64,
+    order_creator: String,
 ) -> OrderRequest {
     OrderRequest::AmendOrder {
         id,
@@ -97,6 +99,7 @@ pub fn amend_order_request(
         price,
         qty,
         ts,
+        order_creator
     }
 }
 
