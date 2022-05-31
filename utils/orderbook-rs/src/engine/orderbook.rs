@@ -107,13 +107,16 @@ impl Orderbook {
         }
     }
 
-    //pub fn get_orders(&mut self, creator_id: AccountId) {
-    //    if let Some(idx_queue) = self.idx_queue.take() {
-    //        let mut active_orders = idx_queue;
-    //        active_orders.retain(|order_ptr| &order_ptr.;
-    //        active_orders.));
-    //    }
-            //}
+   pub fn get_orders(&self, creator_id: String, side: OrderSide) -> Vec<Order>{
+       let mut orders: Vec<Order> = match side {
+           OrderSide::Bid => self.bid_queue.orders.clone().into_values().collect(),
+           OrderSide::Ask => self.ask_queue.orders.clone().into_values().collect()
+       };
+       orders.retain(|order| {
+           order.order_creator == creator_id
+       });
+       orders
+   }
 
     pub fn process_order(&mut self, order: OrderRequest) -> OrderProcessingResult {
         // processing result accumulator
@@ -581,9 +584,94 @@ impl Orderbook {
 
 #[cfg(test)]
 mod test {
-
+    use near_sdk::{AccountId, Gas, testing_env, VMContext};
+    use near_sdk::MockedBlockchain;
     use super::super::orders;
     use super::*;
+
+    fn carol() -> AccountId {
+        "carol.near".to_string()
+    }
+    fn alice() -> AccountId {
+        "alice.near".to_string()
+    }
+    fn bob() -> AccountId {
+        "bob.near".to_string()
+    }
+
+    fn get_context(predecessor_account_id: AccountId) -> VMContext {
+        VMContext {
+            current_account_id: alice(),
+            signer_account_id: bob(),
+            signer_account_pk: vec![0, 1, 2],
+            predecessor_account_id,
+            input: vec![],
+            block_index: 0,
+            block_timestamp: 0,
+            account_balance: 100,
+            account_locked_balance: 0,
+            storage_usage: 10u64.pow(6),
+            attached_deposit: 0,
+            prepaid_gas: Gas::from(10u64.pow(18)),
+            random_seed: vec![0, 1, 2],
+            is_view: false,
+            output_data_receivers: vec![],
+            epoch_height: 0,
+        }
+    }
+
+    fn get_current_time() -> u64 {
+        use std::time::SystemTime;
+        let duration_since_epoch = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        let timestamp_nanos = duration_since_epoch.as_nanos(); // u128
+        timestamp_nanos as u64
+    }
+
+    #[test]
+    fn get_orders() {
+        testing_env!(get_context(carol()));
+        let mut orderbook = Orderbook::new("BTC".to_string(), "USD".to_string());
+        let request = orders::new_limit_order_request(
+            "BTC".to_string(),
+            "USD".to_string(),
+            OrderSide::Bid,
+            2.5, 40,
+            "lena".to_string(),
+            get_current_time()
+        );
+
+        let mut result = orderbook.process_order(request);
+        let request = orders::new_limit_order_request(
+            "BTC".to_string(),
+            "USD".to_string(),
+            OrderSide::Bid,
+            5.5, 45,
+            "lena".to_string(),
+            get_current_time()
+        );
+
+        let mut result = orderbook.process_order(request);
+        let request = orders::new_limit_order_request(
+            "BTC".to_string(),
+            "USD".to_string(),
+            OrderSide::Bid,
+            4.5, 50,
+            "123".to_string(),
+            get_current_time()
+        );
+
+        let mut result = orderbook.process_order(request);
+        let ord = orderbook.get_orders("123".to_string(), OrderSide::Bid);
+        assert_eq!(ord.len(), 1);
+        assert_eq!(ord.last().unwrap().qty, 50);
+
+        let ord = orderbook.get_orders("lena".to_string(), OrderSide::Bid);
+        assert_eq!(ord.len(), 2);
+        assert_eq!(ord.last().unwrap().qty, 40);
+        assert_eq!(ord.first().unwrap().qty, 45);
+    }
 
     #[test]
     fn cancel_nonexisting() {

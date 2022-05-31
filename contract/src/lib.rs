@@ -417,6 +417,12 @@ impl Contract {
         order_book.ask_queue.clone().idx_queue.unwrap().into_vec()
     }
 
+    pub fn get_orders(&self, account_id: AccountId, side: String) -> Vec<Order> {
+        let side = parse_side(side.as_str()).unwrap();
+        let order_book = self.order_books.get(&token_id).unwrap();
+        order_book.get_orders(account_id, side)
+    }
+
     pub fn get_bid_orders(&self, token_id: TokenId) -> Vec<OrderIndex> {
         let order_book = self.order_books.get(&token_id).unwrap();
         order_book.bid_queue.clone().idx_queue.unwrap().into_vec()
