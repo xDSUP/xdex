@@ -2,6 +2,7 @@
 authors = ["Anton Dort-Golts <dortgolts@gmail.com>"]
 name = "orderbook"
 version = "0.1.0"
+edition="2021"
 
 [dependencies]
 serde = { version = "*", features = ["derive"] }

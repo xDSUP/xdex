@@ -8,7 +8,7 @@ use near_sdk::env::panic;
 use near_sdk::json_types::U128;
 use num_traits::cast::ToPrimitive;
 
-use orderbook::{Failed, Orderbook, OrderIndex, orders, OrderSide, Success, OrderType};
+use orderbook::{Failed, Orderbook, OrderIndex, orders, OrderSide, Success, OrderType, Order};
 
 use crate::account::TokenAccount;
 use crate::token::{Token, TokenId};
@@ -417,7 +417,7 @@ impl Contract {
         order_book.ask_queue.clone().idx_queue.unwrap().into_vec()
     }
 
-    pub fn get_orders(&self, account_id: AccountId, side: String) -> Vec<Order> {
+    pub fn get_orders(&self, account_id: AccountId, token_id: TokenId, side: String) -> Vec<Order> {
         let side = parse_side(side.as_str()).unwrap();
         let order_book = self.order_books.get(&token_id).unwrap();
         order_book.get_orders(account_id, side)

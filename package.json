@@ -11,8 +11,8 @@
     "contract-build": "cargo build --target wasm32-unknown-unknown --release && npm run contract-postbuild",
     "contract-postbuild": "cp target/wasm32-unknown-unknown/release/xdsup_dex.wasm ./res/",
     "contract-test": "cargo test --package xdsup_dex -- --nocapture",
-    "contract-deploy:dev": "npm run build && near dev-deploy res/xdsup_dex.wasm",
-    "contract-dev": "npm run deploy:dev && npm start"
+    "contract-deploy:dev": "npm run contract-build && near dev-deploy res/xdsup_dex.wasm",
+    "contract-dev": "npm run contract-deploy:dev && npm start"
   },
 
   "dependencies": {
@@ -32,6 +32,8 @@
     "react-dom": "^18.1.0",
     "react-scripts": "^5.0.1",
     "react-router": "^6.3.0",
+    "react-select": "^5.3.2",
+    "react-tabs": "^5.1.0",
     "react-router-dom": "^6.3.0",
     "typescript": "^4.7.2"
   },

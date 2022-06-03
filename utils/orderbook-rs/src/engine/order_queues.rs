@@ -172,7 +172,7 @@ impl<T> OrderQueue<T> {
     /// Remove dangling indices without orders from queue
     fn remove_stalled(&mut self) {
         if let Some(idx_queue) = self.idx_queue.take() {
-            let mut active_orders = idx_queue;
+            let mut active_orders = idx_queue.into_sorted_vec();
             active_orders.retain(|order_ptr| self.orders.contains_key(&order_ptr.id));
             self.idx_queue = Some(BinaryHeap::from(active_orders));
         }
@@ -182,10 +182,8 @@ impl<T> OrderQueue<T> {
     fn rebuild_idx(&mut self, id: u64, price: f64, qty: u128, ts: u64) {
         if let Some(idx_queue) = self.idx_queue.take() {
             // deconstruct queue
-            let mut active_orders = idx_queue;
-            // remove old idx value
+            let mut active_orders = idx_queue.into_sorted_vec();
             active_orders.retain(|order_ptr| order_ptr.id != id);
-            // insert new one
             active_orders.push(OrderIndex {
                 id,
                 price,

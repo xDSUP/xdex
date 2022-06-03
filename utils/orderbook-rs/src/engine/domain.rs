@@ -16,7 +16,7 @@ impl Default for OrderSide {
     }
 }
 
-#[derive(Default, Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[derive(Default, Debug, Clone, BorshDeserialize, BorshSerialize, Serialize)]
 pub struct Order {
     pub order_id: u64,
     pub order_asset: String,

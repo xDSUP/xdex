@@ -1,0 +1,75 @@
+@import "constraints";
+
+.app-header{
+  a {
+    text-decoration: none;
+    color: $color-text;
+  }
+
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  padding: 8px 8px;
+
+  >div{
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .logo{
+    width: 50px;
+    height: 50px;
+  }
+
+  .app-name{
+    font-size: 26px;
+    font-weight: bold;
+  }
+
+  .nav{
+    :nth-child(n):not(:last-child){
+      margin-right: 16px
+    }
+
+    .active{
+      border-bottom: 1px solid $color-black;
+    }
+  }
+
+  button{
+    background-color: white;
+    border: 0;
+    line-height: 32px;
+    font-size: 16px;
+    border-radius: 8px;
+  }
+
+  // белая секция
+  .white-section{
+    min-height: 36px;
+    align-items: center;
+    background: white;
+    padding: 2px 8px;
+    line-height: 32px;
+    border-radius: 12px;
+  }
+
+  .info {
+    display: flex;
+    flex-direction: row;
+
+    .wallet{
+      margin-left: 8px;
+      background: $color-blue-20;
+      border-radius: 12px;
+      padding: 0px 8px;
+    }
+  }
+
+  .user-info{
+    > :nth-child(n){
+      margin-right: 16px;
+    }
+  }
+}

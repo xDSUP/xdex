@@ -1,0 +1,36 @@
+$color-blue-20: #f3f5fa;
+$color-blue-21: #f3f5fb;
+$color-blue-30: #d4e4fa;
+$color-blue-40: #dfebff;
+$color-white: white;
+$color-black: black;
+
+
+$color-background: linear-gradient(112deg, rgba(199, 211, 228, 0) 0%, #c7d3e4 50.65%, rgba(199, 211, 228, 0) 100%);
+
+
+$color-text: $color-black;
+$color-text-logo: $color-black;
+$color-text-button: $color-black;
+
+$before_symbols: 8px;
+
+.near-symbol::before{
+  content: "Ⓝ";
+  padding-right: $before_symbols;
+}
+
+.near-symbol::after{
+  content: "NEAR";
+  padding-left: $before_symbols;
+}
+
+.xdho-symbol::before{
+  content: "Ⓧ";
+  padding-right: $before_symbols;
+}
+
+.xdho-symbol::after{
+  content: "XDHO";
+  padding-left: $before_symbols;
+}

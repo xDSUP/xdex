@@ -1,9 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import './css/index.css';
+import './css/main.css';
 import App from './App';
 import {Provider} from "mobx-react";
 import {initContract, Store} from "./contract/contract";
+import {BrowserRouter} from "react-router-dom";
 
 
 
@@ -19,7 +20,9 @@ initContract()
         root.render(
             <Provider {...stores}>
                 <React.StrictMode>
-                    <App />
+                    <BrowserRouter>
+                        <App />
+                    </BrowserRouter>
                 </React.StrictMode>
             </Provider>
         );

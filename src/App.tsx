@@ -1,9 +1,12 @@
 import React from 'react';
-import logo from './logo.svg';
-import './css/App.css';
+import logo from './images/logo.svg';
 import {inject, observer} from "mobx-react";
 import {action, makeObservable, observable, runInAction} from "mobx";
 import {NearContext, Store} from "./contract/contract";
+import {BrowserRouter, Routes, Route, Link, NavLink} from "react-router-dom";
+import {InvestorPage} from "./pages/InvestorPage";
+import {RegistartorPage} from "./pages/RegistartorPage";
+import {EmitentPage} from "./pages/EmitentPage";
 
 
 class AppState{
@@ -13,38 +16,13 @@ class AppState{
     constructor() {
         makeObservable(this);
     }
-
 }
 
 @inject((allStores: Store) => ({
     nearContext: allStores.nearContext as NearContext
 }))
 @observer
-class App extends React.Component<{nearContext?: NearContext, title?: String}>{
-
-    @action.bound
-    updateBalance(){
-        let nearContext = this.props.nearContext;
-        if(nearContext){
-            if (nearContext.currentUser) {
-                nearContext.contract
-                    .get_balance({owner_id: nearContext.currentUser.accountId, token_id: "XDHO"})
-                    // @ts-ignore
-                    .then(balance =>
-                        {
-                            runInAction(() => {
-                                this.balance = Number(balance);
-                            })
-                        });
-            }
-        }
-    }
-
-    @action.bound
-    updateBalanceOnce(){
-        this.balance++;
-    }
-
+class PageHeader extends React.Component<{nearContext?: NearContext}> {
     signIn(){
         this.props.nearContext?.wallet.requestSignIn(
             {contractId: this.props.nearContext.config.contractName, methodNames: []},
@@ -57,37 +35,62 @@ class App extends React.Component<{nearContext?: NearContext, title?: String}>{
         window.location.replace(window.location.origin + window.location.pathname);
     };
 
-    render(){
+    render() {
         let nearContext = this.props.nearContext;
         let currentUser = nearContext?.currentUser;
+        return <header>
+            <div className={"app-header"}>
+                <div>
+                    <img className={"logo"} src={logo}/>
+                    <Link className={"app-name"} to={"/"}>xDEx</Link>
+                </div>
+                <div className={"nav"}>
+                    <NavLink className={""} to={"/investor"}>Торги</NavLink>
+                    <NavLink className={""} to={"/registrator"}>Голосование</NavLink>
+                    <NavLink className={""} to={"/emitent"}>Эмитенту</NavLink>
+                </div>
+                <div className={"user-info"}>
+                    {currentUser && <>
+                        <span className={"xdho-symbol white-section"}>245</span>
+                        <div className={"info white-section"}>
+                            <span className={"near-symbol"}>23145</span>
+                            <span className={"wallet"}>ME...0123124rRe</span>
+                        </div>
+                        {currentUser
+                            ? <button onClick={this.signOut}>Log out</button>
+                            : <button onClick={this.signIn}>Log in</button>
+                        }
+                        </>
+                    }
+                </div>
+            </div>
+        </header>;
+    }
+}
+
+class PageFooter extends React.Component {
+    render() {
+        return null;
+    }
+}
+
+@inject((allStores: Store) => ({
+    nearContext: allStores.nearContext as NearContext
+}))
+@observer
+class App extends React.Component<{}>{
+    render(){
+
         return <main>
             <div className="App">
-                <header className="App-header">
-                    <img src={logo} className="App-logo" alt="logo" />
-                    <p>
-                        Edit <code>src/App.tsx</code> and save to reload.
-                    </p>
-                    <a
-                        className="App-link"
-                        href="https://reactjs.org"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                    >
-                        {"Learn React with balance " + this.balance}
-                    </a>
-                    {currentUser ?
-                        <p>Currently signed in as: <code>{currentUser.accountId || "hello"}</code></p>
-                        :
-                        <p>Update or add a status message! Please login to continue.</p>
-                    }
-
-                    { currentUser
-                        ? <button onClick={() => this.signOut()}>Log out</button>
-                        : <button onClick={() => this.signIn()}>Log in</button>
-                    }
-                    <button onClick={() => runInAction(this.updateBalance)}>update</button>
-                    <button onClick={() => this.updateBalanceOnce()}>update</button>
-                </header>
+                <PageHeader/>
+                <Routes>
+                    <Route path={"/"} element={<div>Hello1</div>}/>
+                    <Route path={"/investor"} element={<InvestorPage/>}/>
+                    <Route path={"/registrator"} element={<RegistartorPage/>}/>
+                    <Route path={"/emitent"} element={<EmitentPage/>}/>
+                </Routes>
+                <PageFooter/>
             </div>
         </main>
     }
