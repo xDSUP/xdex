@@ -1,31 +1,70 @@
-import React from 'react';
+import React, {useRef} from 'react';
 import {inject, observer} from "mobx-react";
-import {NearContext, Store} from "./contract/contract";
+import {NearContext} from "./contract/contract";
 import {Link, NavLink, Route, Routes} from "react-router-dom";
 import {InvestorPage, InvestorPageState} from "./pages/InvestorPage";
 import {RegistartorPage} from "./pages/RegistartorPage";
 import {EmitentPage} from "./pages/EmitentPage";
-
 import logo from './images/logo.svg';
 import wallet from "./images/wallet.svg"
+import {Store} from "./index";
+import {OverlayPanel} from "primereact/overlaypanel";
+import {Button} from "primereact/button";
 
-import 'primereact/resources/primereact.css';
-import 'primeicons/primeicons.css';
-import 'primeflex/primeflex.css';
+
+var ProfilePopup = inject((allStores: Store) => ({
+    nearContext: allStores.nearContext as NearContext
+}))(observer((props: { nearContext?: NearContext }) => {
+
+    let balances: React.ReactNode[] = [];
+    props.nearContext?.currentUser?.balanceOtherTokens.forEach((value, key) => {
+        if(value > 0){
+            balances.push(<div className={"flex flex-row justify-content-between"}>
+                <div className={"flex flex-row align-items-center"}>
+                    <i className={"pi pi-money-bill mr-3"}></i>
+                    <div className={"flex flex-column"}>
+                        <span className={"text-2xl"}>{key}</span>
+                        <p className={"text-700"}>{value} {key}</p>
+                    </div>
+                </div>
+                <div>
+                    <h5>$12.52</h5>
+                </div>
+            </div>);
+        }
+    })
+
+    return <>
+        <h2>Счёт</h2>
+        <div className={"bid-buttons"}>
+            <Button label={"Приобрести XDHO"} className={"p-button mr-4"} icon="pi pi-arrow-down-left"/>
+            <Button label={"Продать XDHO"} className={"p-button"} icon="pi pi-arrow-up-right"/>
+        </div>
+        <h3>Баланс токенов на платформе:</h3>
+        <div className={"balances flex flex-column"}>
+            {balances}
+        </div>
+    </>
+}));
 
 const PageHeader = inject((allStores: Store) => ({
     nearContext: allStores.nearContext as NearContext
 }))(observer((props: { nearContext?: NearContext }) => {
-    var signIn = () => {
+    const signIn = () => {
         props.nearContext?.wallet.requestSignIn(
             {contractId: props.nearContext.config.contractName, methodNames: []},
             "NEAR hello!"
         );
     };
 
-    var signOut = () => {
+    const signOut = () => {
         props.nearContext?.wallet.signOut();
         window.location.replace(window.location.origin + window.location.pathname);
+    };
+
+    const profilePopup = useRef<OverlayPanel>(null);
+    const toggleProfile = (event: any) => {
+        profilePopup.current?.toggle(event);
     };
 
     let nearContext = props.nearContext;
@@ -46,7 +85,10 @@ const PageHeader = inject((allStores: Store) => ({
                     <span className={"xdho-symbol white-section"}>{currentUser.balanceXdho}</span>
                     <div className={"info white-section"}>
                         <span className={"near-symbol"}>{currentUser.balanceNear}</span>
-                        <span className={"wallet"}>{currentUser.accountId}</span>
+                        <span className={"wallet"} onClick={toggleProfile}>{currentUser.accountId}</span>
+                        <OverlayPanel ref={profilePopup} appendTo={document.body} showCloseIcon className={"profile-popup"}>
+                            <ProfilePopup/>
+                        </OverlayPanel>
                     </div>
                 </>
                 }
@@ -71,31 +113,25 @@ class PageFooter extends React.Component {
     }
 }
 
-@inject((allStores: Store) => ({
-    nearContext: allStores.nearContext as NearContext
-}))
-@observer
-class App extends React.Component<{}> {
-    investorPageState = new InvestorPageState();
+var App = observer(() => {
+    let investorPageState = new InvestorPageState();
 
-    render() {
-        return <main>
-            <div className="App layout-theme-light">
-                <PageHeader/>
-                <div className={"layout-main-container"}>
-                    <div className="layout-main">
-                        <Routes>
-                            <Route path={"/"} element={<div>Hello1</div>}/>
-                            <Route path={"/investor"} element={<InvestorPage state={this.investorPageState}/>}/>
-                            <Route path={"/registrator"} element={<RegistartorPage/>}/>
-                            <Route path={"/emitent"} element={<EmitentPage/>}/>
-                        </Routes>
-                    </div>
+    return <main>
+        <div className="App layout-theme-light">
+            <PageHeader/>
+            <div className={"layout-main-container"}>
+                <div className="layout-main">
+                    <Routes>
+                        <Route path={"/"} element={<div>Hello1</div>}/>
+                        <Route path={"/investor"} element={<InvestorPage state={investorPageState}/>}/>
+                        <Route path={"/registrator"} element={<RegistartorPage/>}/>
+                        <Route path={"/emitent"} element={<EmitentPage/>}/>
+                    </Routes>
                 </div>
-                <PageFooter/>
             </div>
-        </main>
-    }
-}
+            <PageFooter/>
+        </div>
+    </main>
+})
 
 export default App;

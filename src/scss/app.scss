@@ -1,6 +1,13 @@
 @import "constraints";
 .layout-main-container{
   padding-top: 1rem !important;
+  min-height: 100% !important;
+}
+
+.App{
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-header {
@@ -105,11 +112,22 @@
   }
 }
 
+.bids-table{
+  font-size: 10px;
+  line-height: 6px;
+}
+
 .input-end {
   text-align: end;
 
   input {
     text-align: end;
+  }
+}
+
+.page-container{
+  > :last-child{
+    padding-bottom: 0 !important;
   }
 }
 

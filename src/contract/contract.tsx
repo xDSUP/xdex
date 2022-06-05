@@ -3,6 +3,7 @@ import {Contract, WalletConnection} from "near-api-js";
 import {Config, getConfig} from "../config";
 import {action, makeObservable, observable} from "mobx";
 import {f64, u64} from "./helper";
+import Big from "big.js";
 
 export declare type TokenId = string;
 export declare type AccountId = string;
@@ -10,6 +11,7 @@ export declare type Balance = number;
 export declare type Side = "Ask" | "Bid";
 
 export const STANDARD_TOKEN = "XDHO";
+export const BOATLOAD_OF_GAS = Big(3).times(10 ** 13).toFixed();
 
 interface User {
     accountId: string;
@@ -24,7 +26,7 @@ interface TokenMeta {
     owner_id: AccountId
 }
 
-export interface Order{
+export interface Order {
     order_id: u64,
     order_asset: string,
     price_asset: string,
@@ -35,7 +37,7 @@ export interface Order{
     order_creator: String,
 }
 
-export interface OrderIndex{
+export interface OrderIndex {
     id: u64,
     price: f64,
     quantity: u64,
@@ -51,7 +53,7 @@ interface MyContract {
 
     get_balances(args: { owner_id: AccountId, token_ids: TokenId[] }): Promise<Map<TokenId, Balance>>;
 
-    get_orders(args: { account_id: AccountId, token_id: TokenId, side: Side}): Promise<Order[]>;
+    get_orders(args: { account_id: AccountId, token_id: TokenId, side: Side }): Promise<Order[]>;
 
     get_ask_orders(args: { token_id: TokenId }): Promise<OrderIndex[]>;
 
@@ -60,13 +62,15 @@ interface MyContract {
     get_current_spread(args: { token_id: TokenId }): Promise<Balance[]>;
 
     // change
-    new_limit_order(args: { owner_id: AccountId, token_id: TokenId }): Promise<Balance>;
+    new_limit_order(args: { token_id: TokenId, price: f64, quantity: u64, side: Side }, gas: string): Promise<any>;
 
-    new_market_order(args: { owner_id: AccountId, token_id: TokenId }): Promise<Balance>;
+    new_market_order(args: { token_id: TokenId, quantity: u64, side: Side }, gas: string): Promise<any>;
 
-    cancel_limit_order(args: { owner_id: AccountId, token_id: TokenId }): Promise<Balance>;
+    cancel_limit_order(args: { token_id: TokenId, id: u64, side: Side }, gas: string): Promise<any>;
 
-    transfer(args: { owner_id: AccountId, token_id: TokenId }): Promise<Balance>;
+    pay_standard_token(args: { amount: u64, to: AccountId}, gas: string): Promise<any>;
+
+    transfer(args: { new_owner_id: AccountId, token_id: TokenId, amount: u64 }, gas: string): Promise<any>;
 }
 
 export class NearContext {
@@ -79,6 +83,8 @@ export class NearContext {
 
     @observable
     tokens: TokenMeta[];
+    @observable
+    tokensMap: Map<TokenId,TokenMeta>;
 
     constructor(contract: Contract & MyContract, config: Config, wallet: WalletConnection) {
         makeObservable(this);
@@ -87,6 +93,7 @@ export class NearContext {
         this.config = config;
 
         this.tokens = [];
+        this.tokensMap = new Map<TokenId, TokenMeta>();
 
         if (wallet.getAccountId()) {
             this.currentUser = {
@@ -127,6 +134,12 @@ export class NearContext {
     updateTokens() {
         return this.contract.get_tokens().then(value => {
             this.tokens = value;
+            let newTokensMap = new Map<TokenId, TokenMeta>();
+
+            for (const tokenMeta of value) {
+                newTokensMap.set(tokenMeta.token_id, tokenMeta);
+            }
+            this.tokensMap = newTokensMap;
         });
     }
 
@@ -186,6 +199,3 @@ export async function initContract(): Promise<NearContext> {
     return new NearContext(contract, config, wallet);
 }
 
-export interface Store {
-    nearContext: NearContext,
-}
