@@ -7,7 +7,6 @@ import {initContract, Store} from "./contract/contract";
 import {BrowserRouter} from "react-router-dom";
 
 
-
 initContract()
     .then((nearContext) => {
         const stores: Store = {

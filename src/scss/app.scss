@@ -1,6 +1,9 @@
 @import "constraints";
+.layout-main-container{
+  padding-top: 1rem !important;
+}
 
-.app-header{
+.app-header {
   a {
     text-decoration: none;
     color: $color-text;
@@ -11,65 +14,154 @@
   justify-content: space-between;
   padding: 8px 8px;
 
-  >div{
+  > div {
     display: flex;
     flex-direction: row;
     align-items: center;
   }
 
-  .logo{
+  .logo {
     width: 50px;
     height: 50px;
   }
 
-  .app-name{
+  .app-name {
     font-size: 26px;
     font-weight: bold;
   }
 
-  .nav{
-    :nth-child(n):not(:last-child){
+  .nav {
+    :nth-child(n):not(:last-child) {
       margin-right: 16px
     }
 
-    .active{
+    a {
+      font-size: 16px;
+    }
+
+    .active {
       border-bottom: 1px solid $color-black;
     }
   }
 
-  button{
+  button {
     background-color: white;
     border: 0;
     line-height: 32px;
     font-size: 16px;
     border-radius: 8px;
-  }
-
-  // белая секция
-  .white-section{
-    min-height: 36px;
-    align-items: center;
-    background: white;
-    padding: 2px 8px;
-    line-height: 32px;
-    border-radius: 12px;
+    cursor: pointer;
   }
 
   .info {
     display: flex;
     flex-direction: row;
-
-    .wallet{
-      margin-left: 8px;
-      background: $color-blue-20;
-      border-radius: 12px;
-      padding: 0px 8px;
-    }
   }
 
-  .user-info{
-    > :nth-child(n){
+  .user-info {
+    > :nth-child(n) {
       margin-right: 16px;
+    }
+
+    .wallet {
+      margin-left: 8px;
+      background-color: $color-blue-50;
+      border-radius: 16px;
+      padding: 0px 8px;
+      color: $color-blue-90;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+
+      &:hover {
+        border: 1px solid $color-black;
+      }
+
+      &:active {
+        border: 1px solid $color-black;
+        background-color: $color-blue-21;
+      }
     }
   }
 }
+
+// белая секция
+.white-section {
+  min-height: 36px;
+  align-items: center;
+  background: white;
+  padding: 2px 8px;
+  line-height: 32px;
+  border-radius: 16px;
+}
+
+.bid-buttons {
+  display: flex;
+  flex-direction: row;
+  flex-grow: 1;
+
+  > * {
+    width: 50%;
+  }
+}
+
+.input-end {
+  text-align: end;
+
+  input {
+    text-align: end;
+  }
+}
+
+/**
+.page-container {
+  padding: 50px 100px;
+  display: flex;
+  flex-flow: column;
+  height: 100%;
+
+  .token-section {
+    display: flex;
+    flex-direction: row;
+    > div{
+      width: 50%;
+    }
+  }
+
+  .bid-section{
+    min-width: 250px;
+
+    .react-tabs{
+      &__tab-list{
+        display: flex;
+        flex-direction: row;
+        justify-content: space-around;
+        padding-left: 0px;
+        align-items: center;
+      }
+
+      &__tab{
+        list-style-type: none;
+        font-weight: bold;
+
+        &--selected{
+          border: 1px solid black;
+          border-radius: 12px;
+          padding: 4px;
+
+        }
+      }
+    }
+
+  }
+
+  .trader-section {
+    display: flex;
+    flex-direction: row;
+  }
+
+  .trader-view{
+    width: 100%;
+  }
+}
+ */

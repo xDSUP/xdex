@@ -419,9 +419,29 @@ impl Contract {
 
     pub fn get_orders(&self, account_id: AccountId, token_id: TokenId, side: String) -> Vec<Order> {
         let side = parse_side(side.as_str()).unwrap();
-        let order_book = self.order_books.get(&token_id).unwrap();
-        order_book.get_orders(account_id, side)
+        let order_book = self.order_books.get(&token_id);
+        match order_book {
+            Some(t) => (t.get_orders(account_id, side)),
+            None => panic(b"OrderBook not init!"),
+        }
+
     }
+
+    /**
+    pub fn get_all_orders(&self, account_id: AccountId) -> Vec<Order> {
+        let orders = Vec::new();
+        for token in self.tokens {
+            let order_book = self.order_books.get(&token.token_id);
+            orders.push(order_book.)
+                    }
+
+                match order_book {
+            Some(t) => (t.get_orders(account_id, side)),
+            None => panic(b"OrderBook not init!"),
+        }
+
+            }
+    */
 
     pub fn get_bid_orders(&self, token_id: TokenId) -> Vec<OrderIndex> {
         let order_book = self.order_books.get(&token_id).unwrap();
@@ -629,6 +649,13 @@ impl Contract {
             env::current_account_id(),
             "Only contract owner can sign transactions for this method."
         );
+    }
+
+    fn _only_our_token(&mut self, token_id: TokenId) {
+        //self.tokens
+        //assert!(self.tok
+        //    "Only contract owner can sign transactions for this method."
+        //);
     }
 }
 
