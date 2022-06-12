@@ -55,9 +55,9 @@ interface MyContract {
 
     get_orders(args: { account_id: AccountId, token_id: TokenId, side: Side }): Promise<Order[]>;
 
-    get_ask_orders(args: { token_id: TokenId }): Promise<OrderIndex[]>;
+    get_ask_orders(args: { token_id: TokenId }): Promise<Order[]>;
 
-    get_bid_orders(args: { token_id: TokenId }): Promise<OrderIndex[]>;
+    get_bid_orders(args: { token_id: TokenId }): Promise<Order[]>;
 
     get_current_spread(args: { token_id: TokenId }): Promise<Balance[]>;
 

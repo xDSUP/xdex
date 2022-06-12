@@ -1,16 +1,19 @@
 extern crate core;
 
 
+use std::vec;
+
 use near_sdk::{AccountId, Balance, env, near_bindgen, Promise};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LookupMap, Vector};
-use near_sdk::env::panic;
+use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet, Vector};
 use near_sdk::json_types::U128;
 use num_traits::cast::ToPrimitive;
 
-use orderbook::{Failed, Orderbook, OrderIndex, orders, OrderSide, Success, OrderType, Order};
+use orderbook::{Failed, Order, Orderbook, orders, OrderSide, OrderType, Success};
 
 use crate::account::TokenAccount;
+use crate::ballot::{BallotHandler, StakeInfo, UserRequest};
+use crate::request::{Request, RequestId, Vote};
 use crate::token::{Token, TokenId};
 use crate::wallet::TokenWallet;
 
@@ -23,7 +26,12 @@ mod wallet;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
+const NANOSEC_IN_DAY: u64 = 86_400_000_000_000;
+const NANOSEC_IN_DAY_F64: f64 = 86_400_000_000_000.0;
+const PERCENT_STAKING_PER_YEAR: f64 = 0.20;
+const STAKING_PERCENT: f64 = PERCENT_STAKING_PER_YEAR / 365.0 / NANOSEC_IN_DAY_F64;
+/// за наносекунду
+const VOTING_TIME: u64 = NANOSEC_IN_DAY;
 //const SINGLE_CALL_GAS: u64 = 20_000_000_000_000; // 2 x 10^14
 //const TRANSFER_FROM_NEAR_COST: u128 = 36_500_000_000_000_000_000_000; // 365 x 10^20
 
@@ -32,10 +40,12 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 pub struct Contract {
     /// sha256(AccountID) -> Account details.
     pub wallets: LookupMap<Vec<u8>, TokenWallet>,
-
     pub order_books: LookupMap<TokenId, Orderbook>,
     /// разрешенные токены
-    pub tokens: Vector<Token>,
+    pub tokens: UnorderedMap<TokenId, Token>,
+    pub ballot_handler: BallotHandler,
+    pub staking: LookupMap<Vec<u8>, StakeInfo>,
+
     /// владелец контракта
     owner_id: AccountId,
 }
@@ -48,26 +58,29 @@ impl Default for Contract {
 
 #[near_bindgen]
 impl Contract {
-    /// Initializes the contract with the given total supply owned by the given `owner_id`.
+    /// Инициализирует контракт и переводит все биржевые токены XDHO к `owner_id`.
     #[init]
     pub fn new(owner_id: AccountId) -> Self {
         assert!(env::state_read::<Self>().is_none(), "Already initialized");
         let mut contract = Self {
             order_books: LookupMap::new(b"o".to_vec()),
             wallets: LookupMap::new(b"w".to_vec()),
-            tokens: Vector::new(b"t".to_vec()),
+            tokens: UnorderedMap::new(b"t".to_vec()),
+            ballot_handler: BallotHandler::new(),
             owner_id: owner_id.clone(),
+            staking: LookupMap::new(b"s".to_vec()),
         };
         contract.add_token(Token {
             token_id: "XDHO".to_string(),
             owner_id: owner_id.clone(),
             supply: 100_000_000_000,
         });
+
         contract
     }
 
-    /// Sets the `allowance` for `escrow_account_id` on the account of the caller of this contract
-    /// (`predecessor_id`) who is the balance owner.
+    /// Устанавливает допустимое кол-во `allowance` для `escrow_account_id` которое он сможет
+    /// списывать с владельца этого аккаунта (`predecessor_id`)
     pub fn set_allowance(
         &mut self,
         escrow_account_id: AccountId,
@@ -205,15 +218,124 @@ impl Contract {
     }
 }
 
+/// Секция работы с голосованием
+#[near_bindgen]
+impl Contract {
+    pub fn stake(&mut self, amount: Balance) {
+        let old_staking = self.get_staking(env::predecessor_account_id());
+        if old_staking.staked != 0 {
+            env::panic(b"You have staked tokens. First do the unstaking");
+        }
+
+        self.transfer_from(
+            env::predecessor_account_id(),
+            self.owner_id.clone(),
+            "XDHO".to_string(),
+            U128(amount),
+        );
+        self.set_staking(env::predecessor_account_id(), amount);
+    }
+
+    pub fn get_staking(&self, owner_id: AccountId) -> StakeInfo {
+        let account_hash = env::sha256(owner_id.as_bytes());
+        self.staking.get(&account_hash).unwrap_or(StakeInfo {
+            staked: 0,
+            created_time: env::block_timestamp(),
+        })
+    }
+
+    fn set_staking(&mut self, owner_id: AccountId, amount: Balance) {
+        let account_hash = env::sha256(owner_id.as_bytes());
+        self.staking.insert(&account_hash, &StakeInfo {
+            staked: amount,
+            created_time: env::block_timestamp(),
+        });
+    }
+
+    pub fn unstake(&mut self) {
+        let old_staking = self.get_staking(env::predecessor_account_id());
+        if old_staking.staked == 0 {
+            env::panic(b"You did't have staked tokens. First do the staking");
+        }
+        let created_time = env::block_timestamp() - old_staking.created_time;
+        let mut amount = created_time.to_f64().unwrap() * STAKING_PERCENT + 1.0;
+        amount *= old_staking.staked.to_f64().unwrap();
+        self.transfer_from_user(
+            self.owner_id.clone(),
+            env::predecessor_account_id(),
+            "XDHO".to_string(),
+            U128(amount.to_u128().unwrap()),
+        );
+        let account_hash = env::sha256(env::predecessor_account_id().as_bytes());
+        self.staking.remove(&account_hash);
+    }
+
+    pub fn add_new_request(&mut self, request: UserRequest) {
+        if self.tokens.get(&request.token_id).is_some(){
+            env::panic(b"A token with this ID already exists");
+        }
+
+        //TODO: брать плату за запросики
+        self.ballot_handler.add_new_request(request);
+    }
+
+    pub fn get_all_requests(&self) -> Vec<Request> {
+        self.ballot_handler.get_all_requests()
+    }
+
+    pub fn vote(&mut self, request_id: RequestId, vote: bool) {
+        let request = self.ballot_handler.get_request(request_id);
+        match request {
+            None => env::panic(b"There is no request with this id"),
+            Some(req) => {
+                if req.created_time + VOTING_TIME < env::block_timestamp(){
+                    //TODO: финализировать тута
+                    env::panic(b"The voting has already ended");
+                }
+            },
+        }
+        let staked = self.get_staking(env::predecessor_account_id());
+        if staked.staked == 0 {
+            env::panic(b"You did't have staked tokens. First do the staking");
+        }
+        if self.is_voting(env::predecessor_account_id(), request_id) {
+            env::panic(b"You have already voted for this request");
+        }
+        self.ballot_handler.vote(request_id, vote);
+    }
+
+    pub fn is_voting(&self, voter_id: AccountId, request_id: RequestId) -> bool {
+        self.ballot_handler.is_vote(request_id, voter_id)
+    }
+
+    pub fn finalize(&mut self, request_id: RequestId) {
+        let request = self.ballot_handler.get_request(request_id);
+        match request {
+            None => env::panic(b"There is no request with this id"),
+            Some(req) => {
+                if req.created_time + VOTING_TIME > env::block_timestamp(){
+                    env::panic(b"The voting is not over yet");
+                }
+            },
+        }
+
+
+    }
+}
+
 #[near_bindgen]
 impl Contract {
     pub fn get_tokens(&self) -> Vec<Token> {
-        self.tokens.to_vec()
+        let mut result: Vec<Token> = Vec::new();
+        for token in self.tokens.values() {
+            result.push(token);
+        }
+        result
     }
 
     #[private]
     pub fn add_token(&mut self, token: Token) {
-        self.tokens.push(&token);
+        self.tokens.insert(&token.token_id,&token);
         let token_id = token.token_id;
         let owner_id = &token.owner_id;
         let mut account = self.get_account(owner_id, token_id.clone());
@@ -240,7 +362,6 @@ impl Contract {
 
     /// Helper method to get the account details for `owner_id`.
     fn get_account(&self, owner_id: &AccountId, token_id: TokenId) -> TokenAccount {
-
         self.get_wallet(owner_id)
             .get_account(&token_id)
             .unwrap_or(TokenAccount::new(env::sha256(owner_id.as_bytes())))
@@ -264,7 +385,7 @@ fn parse_side(side: &str) -> Option<OrderSide> {
     match side {
         "Ask" => Some(OrderSide::Ask),
         "Bid" => Some(OrderSide::Bid),
-        _ => panic(b"Side not parsed!"),
+        _ => env::panic(b"Side not parsed!"),
     }
 }
 
@@ -274,11 +395,11 @@ fn get_current_time() -> u64 {
 
 #[near_bindgen]
 impl Contract {
-    pub fn new_ask_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128){
+    pub fn new_ask_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128) {
         self.new_limit_order(token_id, price, quantity, "Ask".to_string())
     }
 
-    pub fn new_bid_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128){
+    pub fn new_bid_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128) {
         self.new_limit_order(token_id, price, quantity, "Bid".to_string())
     }
 
@@ -302,9 +423,9 @@ impl Contract {
 
         Цена аск – это цена предложения или наименьшая цена, по которой продавец согласен продать товар.
         Продавец не хочет продавать дешево
-          */
+         */
         match side {
-            OrderSide::Ask =>{
+            OrderSide::Ask => {
                 println!(
                     "New limit order на продажу {} ${} по цене {} от signer: {}",
                     quantity,
@@ -312,8 +433,8 @@ impl Contract {
                     price,
                     env::signer_account_id(),
                 );
-            },
-            OrderSide::Bid =>{
+            }
+            OrderSide::Bid => {
                 println!(
                     "New limit order на покупку {} ${} по цене {} от signer: {}",
                     quantity,
@@ -362,8 +483,8 @@ impl Contract {
         println!(
             "New рыночн order на {} {} ${} от signer: {}",
             match side {
-                OrderSide::Ask => {"продажу"},
-                OrderSide::Bid => {"покупку"}
+                OrderSide::Ask => { "продажу" }
+                OrderSide::Bid => { "покупку" }
             },
             quantity,
             token_id,
@@ -412,9 +533,9 @@ impl Contract {
         res
     }
 
-    pub fn get_ask_orders(&self, token_id: TokenId) -> Vec<OrderIndex> {
+    pub fn get_ask_orders(&self, token_id: TokenId) -> Vec<Order> {
         let order_book = self.order_books.get(&token_id).unwrap();
-        order_book.ask_queue.clone().idx_queue.unwrap().into_vec()
+        Vec::from_iter(order_book.ask_queue.clone().orders.into_values())
     }
 
     pub fn get_orders(&self, account_id: AccountId, token_id: TokenId, side: String) -> Vec<Order> {
@@ -422,9 +543,8 @@ impl Contract {
         let order_book = self.order_books.get(&token_id);
         match order_book {
             Some(t) => (t.get_orders(account_id, side)),
-            None => panic(b"OrderBook not init!"),
+            None => env::panic(b"OrderBook not init!"),
         }
-
     }
 
     /**
@@ -441,11 +561,11 @@ impl Contract {
         }
 
             }
-    */
+     */
 
-    pub fn get_bid_orders(&self, token_id: TokenId) -> Vec<OrderIndex> {
+    pub fn get_bid_orders(&self, token_id: TokenId) -> Vec<Order> {
         let order_book = self.order_books.get(&token_id).unwrap();
-        order_book.bid_queue.clone().idx_queue.unwrap().into_vec()
+        Vec::from_iter(order_book.bid_queue.clone().orders.into_values())
     }
 
     pub fn get_current_spread(&self, token_id: TokenId) -> Vec<f64> {
@@ -457,11 +577,11 @@ impl Contract {
         }
     }
 
-    fn transfer_from_contract(&mut self, new_owner_id: AccountId, token_id: TokenId, amount: U128){
+    fn transfer_from_contract(&mut self, new_owner_id: AccountId, token_id: TokenId, amount: U128) {
         self.transfer_from_user(env::current_account_id(), new_owner_id, token_id, amount);
     }
 
-    fn transfer_from_user(&mut self, owner_id: AccountId, new_owner_id: AccountId, token_id: TokenId, amount: U128){
+    fn transfer_from_user(&mut self, owner_id: AccountId, new_owner_id: AccountId, token_id: TokenId, amount: U128) {
         let mut acc = self.get_account(&owner_id.clone(), token_id.clone());
         let in_acc = env::predecessor_account_id();
         let allownce = acc.get_allowance(&in_acc.clone());
@@ -487,7 +607,7 @@ impl Contract {
             match success {
                 Success::Accepted {
                     id,
-                    order_type,
+                    order_type: _,
                     order_creator,
                     ts: _,
                 } => {
@@ -502,7 +622,7 @@ impl Contract {
                     order_creator,
                     ts: _,
                 } => {
-                    let token = match *side{
+                    let token = match *side {
                         OrderSide::Ask => self.get_standard_token(),
                         OrderSide::Bid => token_id.clone(),
                     };
@@ -526,7 +646,7 @@ impl Contract {
                                         token,
                                         U128::from(*qty),
                                     );
-                                },
+                                }
                                 OrderSide::Ask => {
                                     let amount = U128::from((price * (*qty).to_f64().unwrap()).to_u128().unwrap());
                                     self.transfer_from_contract(
@@ -534,9 +654,8 @@ impl Contract {
                                         token,
                                         amount,
                                     );
-                                },
+                                }
                             };
-
                         }
                         OrderType::Market => {
                             match side {
@@ -553,16 +672,15 @@ impl Contract {
                                         token,
                                         U128::from(*qty),
                                     );
-                                },
+                                }
                                 OrderSide::Ask => {
                                     self.transfer_from_contract(
                                         order_creator.to_string(),
                                         self.get_standard_token(),
                                         U128::from((price * (*qty).to_f64().unwrap()).to_u128().unwrap()),
                                     );
-                                },
+                                }
                             };
-
                         }
                     }
                 }
@@ -575,7 +693,7 @@ impl Contract {
                     order_creator,
                     ts: _,
                 } => {
-                    let token = match *side{
+                    let token = match *side {
                         OrderSide::Ask => self.get_standard_token(),
                         OrderSide::Bid => token_id.clone(),
                     };
@@ -592,7 +710,7 @@ impl Contract {
                     );
                     match *order_type {
                         OrderType::Limit => {
-                            let amount = match *side{
+                            let amount = match *side {
                                 OrderSide::Ask => (price * (*qty).to_f64().unwrap()).to_u128().unwrap(),
                                 OrderSide::Bid => *qty,
                             };
@@ -618,16 +736,15 @@ impl Contract {
                                         token,
                                         U128::from(*qty),
                                     );
-                                },
+                                }
                                 OrderSide::Ask => {
                                     self.transfer_from_contract(
                                         order_creator.to_string(),
                                         self.get_standard_token(),
                                         U128::from((price * (*qty).to_f64().unwrap()).to_u128().unwrap()),
                                     );
-                                },
+                                }
                             };
-
                         }
                     }
                 }
@@ -665,8 +782,9 @@ mod tests {
     use near_sdk::{AccountId, env, Gas, MockedBlockchain};
     use near_sdk::{testing_env, VMContext};
     use near_sdk::json_types::U128;
+    use num_traits::ToPrimitive;
 
-    use crate::{Contract, Token};
+    use crate::{Contract, NANOSEC_IN_DAY, PERCENT_STAKING_PER_YEAR, Token, UserRequest};
 
     fn standart_token() -> Token {
         Token {
@@ -683,15 +801,19 @@ mod tests {
             supply: 10000,
         }
     }
+
     fn alice() -> AccountId {
         "alice.near".to_string()
     }
+
     fn bob() -> AccountId {
         "bob.near".to_string()
     }
+
     fn ivan() -> AccountId {
         "ivan.near".to_string()
     }
+
     fn carol() -> AccountId {
         "carol.near".to_string()
     }
@@ -749,6 +871,19 @@ mod tests {
         contract
     }
 
+    fn get_contract_with_request() -> Contract{
+        let mut contract = init_contract_with_tokens_and_limit_bids();
+        contract.add_new_request(UserRequest{
+            token_id: "SOSI".to_string(),
+            title: "Тестовое название".to_string(),
+            description: "ПРИВЕТИКИ".to_string(),
+            price: 23,
+            supply: 100000,
+            hash: "сосисочка".to_string()
+        });
+        contract
+    }
+
     #[test]
     fn test_new() {
         let context = get_context(carol());
@@ -771,6 +906,75 @@ mod tests {
             (total_supply - transfer_amount)
         );
         assert_eq!(contract.get_balance(bob(), standart_token().token_id).0, transfer_amount);
+    }
+
+    #[test]
+    fn test_failed_unstaking() {
+        let mut contract = init_contract_with_tokens_and_limit_bids();
+        let context = get_extend_context(carol(), carol());
+        testing_env!(context);
+
+        catch_unwind_silent(move || {
+            contract.unstake();
+        }).unwrap_err();
+    }
+
+    #[test]
+    fn test_failed_staking() {
+        let mut contract = init_contract_with_tokens_and_limit_bids();
+        let context = get_extend_context(carol(), carol());
+        testing_env!(context);
+
+        contract.stake(123);
+        catch_unwind_silent(move || {
+            contract.stake(123);
+        }).unwrap_err();
+    }
+
+    #[test]
+    fn test_staking() {
+        let mut contract = init_contract_with_tokens_and_limit_bids();
+        let context = get_extend_context(carol(), carol());
+        testing_env!(context);
+        let amount = 100;
+        let old_balance = contract.get_balance(carol(), standart_token().token_id);
+        contract.stake(amount);
+        assert_eq!(contract.get_balance(carol(), standart_token().token_id).0, old_balance.0 - amount);
+        assert_eq!(contract.get_staking(carol()).staked, amount);
+
+        let mut context = get_extend_context(carol(), carol());
+        context.block_timestamp = NANOSEC_IN_DAY * 365;
+        testing_env!(context);
+        contract.unstake();
+        assert_eq!(
+            contract.get_balance(carol(), standart_token().token_id).0,
+            old_balance.0 + (amount.to_f64().unwrap() * PERCENT_STAKING_PER_YEAR).to_u128().unwrap()
+        );
+        assert_eq!(contract.get_staking(carol()).staked, 0);
+    }
+
+    #[test]
+    fn test_voting_without_staking() {
+        let mut contract = get_contract_with_request();
+        let context = get_extend_context(carol(), carol());
+        testing_env!(context);
+        let amount = 100;
+        let old_balance = contract.get_balance(carol(), standart_token().token_id);
+        catch_unwind_silent(move || {
+            contract.vote(0, true);
+        }).unwrap_err();
+    }
+
+    #[test]
+    fn test_voting_after_staking() {
+        let mut contract = get_contract_with_request();
+        let context = get_extend_context(carol(), carol());
+        testing_env!(context);
+        let amount = 100;
+        let old_balance = contract.get_balance(carol(), standart_token().token_id);
+        contract.stake(amount);
+        contract.vote(0, true);
+        assert!(contract.is_voting(carol(), 0));
     }
 
     #[test]
@@ -815,7 +1019,7 @@ mod tests {
         catch_unwind_silent(move || {
             contract.set_allowance(carol(), standart_token().token_id, (total_supply / 2).into());
         })
-        .unwrap_err();
+            .unwrap_err();
     }
 
     #[test]
@@ -825,10 +1029,10 @@ mod tests {
         let total_supply = 10000;
         let mut contract = Contract::new(carol());
 
-        contract.add_token(Token{
+        contract.add_token(Token {
             token_id: test_token().token_id,
             supply: test_token().supply,
-            owner_id: carol()
+            owner_id: carol(),
         });
         let balance = contract
             .get_balance(carol(), test_token().token_id)
@@ -900,7 +1104,7 @@ mod tests {
         }
     }
 
-    fn init_contract_with_tokens_and_limit_bids() -> Contract{
+    fn init_contract_with_tokens_and_limit_bids() -> Contract {
         let mut contract = init_contract_with_tokens();
         contract.new_limit_order(test_token().token_id, 5.0, 100, "Ask".to_string());
         contract.new_limit_order(test_token().token_id, 6.0, 200, "Ask".to_string());
@@ -965,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_limit_order(){
+    fn matching_limit_order() {
         let mut contract = init_contract_with_tokens_and_limit_bids();
         let context = get_extend_context(ivan(), ivan());
         testing_env!(context);
@@ -994,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_market_order(){
+    fn matching_market_order() {
         let mut contract = init_contract_with_tokens_and_limit_bids();
         let context = get_extend_context(ivan(), ivan());
         testing_env!(context);
@@ -1023,7 +1227,7 @@ mod tests {
     }
 
     #[test]
-    fn cansel_limit_order(){
+    fn cansel_limit_order() {
         let mut contract = init_contract_with_tokens_and_limit_bids();
 
         let context = get_extend_context(bob(), bob());

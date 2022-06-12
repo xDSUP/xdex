@@ -3,8 +3,8 @@ import {inject, observer} from "mobx-react";
 import {NearContext} from "./contract/contract";
 import {Link, NavLink, Route, Routes} from "react-router-dom";
 import {InvestorPage, InvestorPageState} from "./pages/InvestorPage";
-import {RegistartorPage} from "./pages/RegistartorPage";
-import {EmitentPage} from "./pages/EmitentPage";
+import {RegistartorPage, RegistartorPageState} from "./pages/RegistartorPage";
+import {EmitentPage, EmitentPageState} from "./pages/EmitentPage";
 import logo from './images/logo.svg';
 import wallet from "./images/wallet.svg"
 import {Store} from "./index";
@@ -115,6 +115,8 @@ class PageFooter extends React.Component {
 
 var App = observer(() => {
     let investorPageState = new InvestorPageState();
+    let registartorPage = new RegistartorPageState();
+    let emitentPage = new EmitentPageState();
 
     return <main>
         <div className="App layout-theme-light">
@@ -124,8 +126,8 @@ var App = observer(() => {
                     <Routes>
                         <Route path={"/"} element={<div>Hello1</div>}/>
                         <Route path={"/investor"} element={<InvestorPage state={investorPageState}/>}/>
-                        <Route path={"/registrator"} element={<RegistartorPage/>}/>
-                        <Route path={"/emitent"} element={<EmitentPage/>}/>
+                        <Route path={"/registrator"} element={<RegistartorPage state={registartorPage}/>}/>
+                        <Route path={"/emitent"} element={<EmitentPage state={emitentPage}/>}/>
                     </Routes>
                 </div>
             </div>

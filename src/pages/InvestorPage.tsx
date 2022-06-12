@@ -1,6 +1,6 @@
-import React, {useMemo} from "react";
+import React, {useMemo, useState} from "react";
 import {inject, observer} from "mobx-react";
-import {Balance, BOATLOAD_OF_GAS, NearContext, Order, OrderIndex, STANDARD_TOKEN} from "../contract/contract";
+import {Balance, BOATLOAD_OF_GAS, NearContext, Order, OrderIndex, Side, STANDARD_TOKEN} from "../contract/contract";
 import {Button} from "primereact/button";
 import {Dropdown} from "primereact/dropdown";
 import {action, makeObservable, observable, runInAction} from "mobx";
@@ -37,14 +37,13 @@ export class InvestorPageState {
     tokenPrice = 0;
 
     @observable
-    orders: OrderIndex[] = [];
+    orders: FullOrder[] = [];
     @observable
     spread: Balance[] = [0, 0];
     @observable
     myOrders: Order[] = [];
     updateSelectedMode = action((mode: SwapMode) => {
         this.selectedMode = mode;
-        console.log("Новый мод " + mode);
     });
     updateSelectedToken = action((token: string) => {
         this.selectedToken = token;
@@ -55,7 +54,7 @@ export class InvestorPageState {
     updateTokenPrice = action((limit: number) => {
         this.tokenPrice = limit;
     });
-    updateOrders = action((orders: OrderIndex[]) => {
+    updateOrders = action((orders: FullOrder[]) => {
         this.orders = orders;
     });
     updateMyOrders = action((orders: Order[]) => {
@@ -69,33 +68,72 @@ export class InvestorPageState {
         makeObservable(this);
     }
 
-    @observable _isLoadingMyOrders: boolean = false;
+    @observable loadingMyOrders: boolean = false;
 
-    set isLoadingMyOrders(value: boolean) {
-        this._isLoadingMyOrders = value;
+    @action.bound
+    setLoadingMyOrders(value: boolean) {
+        this.loadingMyOrders = value;
     }
+}
+
+interface FullOrder {
+    price: number;
+    quantity: number;
+    order_side: Side;
+}
+
+function mergeIdenticalPrices(orders?: Order[]): Map<number, FullOrder> {
+    let newOrders = new Map<number, FullOrder>();
+    if (orders) {
+        for (const order of orders) {
+            if (newOrders.has(order.price)) {
+                let oldQty = newOrders.get(order.price) || {price: order.price, quantity: order.qty, order_side: order.side};
+                oldQty.quantity += order.qty;
+                newOrders.set(order.price, oldQty);
+            } else {
+                newOrders.set(order.price, {price: order.price, quantity: order.qty, order_side: order.side});
+            }
+        }
+    }
+    return newOrders;
 }
 
 export const InvestorPage = inject((allStores: Store) => ({
         toastContext: allStores.toast as ToastContext,
         nearContext: allStores.nearContext as NearContext
     }))(observer((props: { toastContext?: ToastContext, nearContext?: NearContext, state: InvestorPageState }) => {
+            let [orderProcessing, setOrderProcessing] = useState(false);
+
             let updateOrders = () => {
-                runInAction(() => {
-                    let asks = props.nearContext?.contract.get_ask_orders({
-                        token_id: props.state.selectedToken
-                    });
-                    let bids = props.nearContext?.contract.get_bid_orders({
-                        token_id: props.state.selectedToken
-                    });
-                    Promise.all([asks, bids]).then(value => {
-                        console.log(value);
-                    });
-                })
+
+                let asks = props.nearContext?.contract.get_ask_orders({
+                    token_id: props.state.selectedToken
+                }).then(orders => {
+                    console.log(orders);
+                    let mergedAsks = mergeIdenticalPrices(orders);
+                    return [...mergedAsks.values()].sort((a, b) => b.price - a.price);
+                });
+                let bids = props.nearContext?.contract.get_bid_orders({
+                    token_id: props.state.selectedToken
+                }).then(orders => {
+                    console.log(orders);
+                    let mergedAsks = mergeIdenticalPrices(orders);
+                    return [...mergedAsks.values()].sort((a, b) => b.price - a.price);
+                });
+                Promise.all([asks, bids]).then(value => {
+                    let asks = value[0] || [];
+                    let bids = value[1] || [];
+
+                    let orders: FullOrder[] = [...asks, ...bids];
+
+                    runInAction(() => {
+                        props.state.updateOrders(orders);
+                    })
+                });
             };
 
             let updateMyOrders = () => {
-                props.state.isLoadingMyOrders = true;
+                props.state.setLoadingMyOrders(true);
                 runInAction(() => {
                         let context = props.nearContext;
                         if (context?.currentUser) {
@@ -119,7 +157,7 @@ export const InvestorPage = inject((allStores: Store) => ({
                                 })));
 
                                 props.state.updateMyOrders(orders);
-                            }).finally(() => props.state.isLoadingMyOrders = false);
+                            }).finally(() => props.state.setLoadingMyOrders(false));
 
                         }
                     }
@@ -149,9 +187,11 @@ export const InvestorPage = inject((allStores: Store) => ({
                     props.nearContext?.updateXdhoBalance();
                     props.nearContext?.updateAllBalance();
                     props.toastContext?.showSuccess("Лимитный ордер на покупку принят");
+                    updateOrders();
+                    updateSpread();
                 }).catch(reason => {
                     props.toastContext?.showError(reason);
-                })
+                }).finally(() => setOrderProcessing(false));
             }
 
             let newBidMarketOrder = () => {
@@ -164,9 +204,11 @@ export const InvestorPage = inject((allStores: Store) => ({
                     props.nearContext?.updateXdhoBalance();
                     props.nearContext?.updateAllBalance();
                     props.toastContext?.showSuccess("Рыночный ордер на покупку принят");
+                    updateOrders();
+                    updateSpread();
                 }).catch(reason => {
                     props.toastContext?.showError(reason);
-                })
+                }).finally(() => setOrderProcessing(false))
             }
 
             let newAskLimitOrder = () => {
@@ -181,9 +223,11 @@ export const InvestorPage = inject((allStores: Store) => ({
                     props.nearContext?.updateXdhoBalance();
                     props.nearContext?.updateAllBalance();
                     props.toastContext?.showSuccess("Лимитный ордер на продажу принят");
+                    updateOrders();
+                    updateSpread();
                 }).catch(reason => {
                     props.toastContext?.showError(reason);
-                })
+                }).finally(() => setOrderProcessing(false))
             }
 
             let newAskMarketOrder = () => {
@@ -196,11 +240,12 @@ export const InvestorPage = inject((allStores: Store) => ({
                     props.nearContext?.updateXdhoBalance();
                     props.nearContext?.updateAllBalance();
                     props.toastContext?.showSuccess("Рыночный ордер на продажу принят");
+                    updateOrders();
+                    updateSpread();
                 }).catch(reason => {
                     props.toastContext?.showError(reason);
-                })
+                }).finally(() => setOrderProcessing(false))
             }
-
 
             useMemo(() => {
                 console.log("Обновляю");
@@ -212,7 +257,7 @@ export const InvestorPage = inject((allStores: Store) => ({
             return <>
                 <div className={"page-container grid"}>
                     <div className={"col-12 sm:col-4"}>
-                        <div className={"card flex"}>
+                        <div className={"card flex justify-content-between"}>
                             <Dropdown value={props.state.selectedToken}
                                       onChange={(e) => props.state.updateSelectedToken(e.value)}
                                       options={props.nearContext?.tokens.filter(value => value.token_id !== STANDARD_TOKEN)}
@@ -234,7 +279,8 @@ export const InvestorPage = inject((allStores: Store) => ({
                     <div className={"col-12 sm:col-4"}>
                         <div className={"card"}>
                             <span className={"block"}>Всего токенов в обороте</span>
-                            <span className={"block"}>{props.nearContext?.tokensMap.get(props.state.selectedToken)?.supply || 0}</span>
+                            <span
+                                className={"block"}>{props.nearContext?.tokensMap.get(props.state.selectedToken)?.supply || 0}</span>
                         </div>
                     </div>
                     <div className={"col-12 md:col-4"}>
@@ -272,22 +318,24 @@ export const InvestorPage = inject((allStores: Store) => ({
                                 </div>
                             </div>
                             <div className={"bid-buttons"}>
-                                <Button label="Купить" className="p-button-success"
+                                <Button label="Купить" className="p-button-success" disabled={orderProcessing}
+
                                         onClick={() => {
+                                            setOrderProcessing(true);
                                             props.state.selectedMode === SwapMode.LIMIT
                                                 ? newBidLimitOrder()
                                                 : newBidMarketOrder()
                                         }}
                                         style={{marginRight: '.5em'}}/>
-                                <Button label="Продать" className="p-button-danger"
+                                <Button label="Продать" className="p-button-danger" disabled={orderProcessing}
                                         onClick={() => {
+                                            setOrderProcessing(true);
                                             props.state.selectedMode === SwapMode.LIMIT
                                                 ? newAskLimitOrder()
                                                 : newAskMarketOrder()
                                         }}
                                         style={{marginRight: '.5em'}}/>
                             </div>
-
                         </div>
                     </div>
                     <div className={"col-12 md:col-8"}>
@@ -297,22 +345,31 @@ export const InvestorPage = inject((allStores: Store) => ({
                     </div>
                     <div className={"col-12 md:col-4"}>
                         <div className={"card p-fluid"}>
-                            Ставочки и нас много = {props.state.spread}
+                            <span>{`Спред: [${props.state.spread[0]}, ${props.state.spread[1]}]`}</span>
+                            <DataTable value={props.state.orders} className="p-datatable-gridlines"
+                                       rows={10} tableClassName={"orders-table"} showGridlines={false}
+                                       rowClassName={data => data.order_side == "Ask" ? "ask-order" : "bid-order"}
+                                       emptyMessage="Нет ордеров">
+                                <Column field="price" header="Цена XDHO" style={{minWidth: '6rem'}}/>
+                                <Column field="quantity" header={`Объём ${props.state.selectedToken}`} style={{minWidth: '7rem', textAlign:'end'}}/>
+                                <Column field="total" header="Обьём XDHO" style={{minWidth: '7rem', textAlign:'end'}}/>
+                            </DataTable>
+
                         </div>
                     </div>
 
                     <div className="col-12 md:col-8">
                         <div className="card">
                             <h5>Открытые ордера</h5>
-                            <DataTable value={props.state.myOrders} paginator className="p-datatable-gridlines" showGridlines
+                            <DataTable value={props.state.myOrders} paginator className="p-datatable-gridlines"
                                        rows={10}
-                                       dataKey="id" filterDisplay="menu" loading={props.state._isLoadingMyOrders}
+                                       dataKey="id" filterDisplay="menu" loading={props.state.loadingMyOrders}
                                        responsiveLayout="scroll" tableClassName={"bids-table"}
                                        emptyMessage="Нет ордеров">
                                 <Column field="order_id" header="Ид" style={{minWidth: '5rem'}}/>
                                 <Column field="order_asset" header="Токен" sortable style={{minWidth: '8rem'}}/>
                                 <Column field="type" header="Тип ордера" sortable style={{minWidth: '7rem'}}/>
-                                <Column field="side" header="Направление" sortable style={{minWidth: '7rem'}}/>
+                                <Column field="side" header="Сделка" sortable style={{minWidth: '7rem'}}/>
                                 <Column field="price" header="Цена" sortable style={{minWidth: '12rem'}}/>
                                 <Column field="qty" header="Кол-во" sortable style={{minWidth: '12rem'}}/>
                             </DataTable>

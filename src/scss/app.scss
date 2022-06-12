@@ -1,5 +1,6 @@
 @import "constraints";
 .layout-main-container{
+  padding: 0 !important;
   padding-top: 1rem !important;
   min-height: 100% !important;
 }
@@ -8,6 +9,13 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  padding: 0 6rem;
+
+  > * {
+    max-width: 1200px;
+    width: 100%;
+  }
 }
 
 .app-header {
@@ -19,7 +27,6 @@
   display: flex;
   flex-direction: row;
   justify-content: space-between;
-  padding: 8px 8px;
 
   > div {
     display: flex;
@@ -38,6 +45,7 @@
   }
 
   .nav {
+    padding: 0px 50px;
     :nth-child(n):not(:last-child) {
       margin-right: 16px
     }
@@ -128,6 +136,28 @@
 .page-container{
   > :last-child{
     padding-bottom: 0 !important;
+  }
+}
+
+.orders-table{
+  //height: 1rem;
+  .ask-order{
+    background-color: rgba(224, 94, 94, 0.3) !important;
+  }
+
+  .bid-order{
+    background-color: rgba(94, 224, 96, 0.3) !important;;
+  }
+  tr{
+    font-size: 10px;
+    line-height: 6px;
+
+    th{
+      padding: 0.2rem 0.2rem !important;
+    }
+    td {
+      padding: 0.2rem 0.2rem !important;
+    }
   }
 }
 

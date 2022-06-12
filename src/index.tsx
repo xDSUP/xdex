@@ -10,6 +10,7 @@ import 'primereact/resources/primereact.css';
 import 'primeicons/primeicons.css';
 import 'primeflex/primeflex.css';
 import './css/main.css';
+import {IPFSGlobalContext} from "react-ipfs/dist/types";
 
 export interface Store {
     nearContext: NearContext,
@@ -60,14 +61,14 @@ initContract()
         );
 
         root.render(
-            <Provider {...stores}>
-                <React.StrictMode>
-                    <BrowserRouter>
-                        <Toast ref={toast}/>
-                        <App/>
-                    </BrowserRouter>
-                </React.StrictMode>
-            </Provider>
+                <Provider {...stores}>
+                    <React.StrictMode>
+                        <BrowserRouter>
+                            <Toast ref={toast}/>
+                            <App/>
+                        </BrowserRouter>
+                    </React.StrictMode>
+                </Provider>
         );
     });
 

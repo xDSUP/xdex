@@ -7,9 +7,9 @@ use near_sdk::{env, AccountId, Balance};
 pub struct TokenAccount {
     /// Текущий баланс токена
     pub balance: Balance,
-    /// Escrow Account ID hash to the allowance amount.
-    /// Allowance is the amount of tokens the Escrow Account ID can spent on behalf of the account
-    /// owner.
+    /// Информация о том,
+    /// Сколько каждому конкретному кошельку
+    /// дозволено снимать с этого счета
     pub allowances: LookupMap<Vec<u8>, Balance>,
 }
 
