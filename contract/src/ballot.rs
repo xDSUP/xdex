@@ -5,7 +5,7 @@ use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet};
 
 use orderbook::{new_sequence_gen, TradeSequence};
 
-use crate::{Request, RequestId, Vote};
+use crate::{Request, RequestId, Token, Vote};
 use crate::request::RequestStatus;
 
 /// Metadata on the individual token level.
@@ -21,6 +21,16 @@ pub struct StakeInfo {
     pub staked: Balance,
     pub created_time: Timestamp
 }
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize)]
+pub struct LaunchPad {
+    pub price: Balance,
+    /// продано
+    pub sell_supply: u128,
+    pub launched_time: Timestamp,
+    pub token: Token
+}
+
 
 #[derive(Serialize)]
 pub struct UserRequest {
@@ -107,6 +117,21 @@ impl BallotHandler {
         self.votes.insert(&request_id, &votes);
     }
 
+    pub fn reject_request(&mut self, request_id: RequestId){
+        self.update_request_status(&request_id, RequestStatus::REJECTED);
+        self.votes.remove(&request_id);
+    }
+
+    pub fn approve_request(&mut self, request_id: RequestId){
+        self.update_request_status(&request_id, RequestStatus::APPROVED);
+        self.votes.remove(&request_id);
+    }
+
+    fn update_request_status(&mut self, request_id: &RequestId, new_status: RequestStatus) {
+        let mut request = self.requests.get(&request_id).unwrap();
+        request.status = new_status;
+        self.requests.insert(&request_id, &request);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -208,6 +233,30 @@ mod tests {
         handler.vote(0, false);
         assert_eq!( handler.get_all_votes(0)[0], Vote{ owner_id: bob(), result: true });
         assert_eq!(handler.is_vote(0, bob()), true);
+    }
+
+    #[test]
+    fn test_reject_request(){
+        testing_env!(get_context(bob()));
+        let mut handler = get_handler_with_requests();
+        handler.vote(0, true);
+
+        assert_eq!(handler.get_request(0).unwrap().status, RequestStatus::PENDING);
+        handler.reject_request(0);
+        assert_eq!(handler.get_request(0).unwrap().status, RequestStatus::REJECTED);
+        assert_eq!( handler.get_all_votes(0).len(), 0);
+    }
+
+    #[test]
+    fn test_approve_request(){
+        testing_env!(get_context(bob()));
+        let mut handler = get_handler_with_requests();
+        handler.vote(0, true);
+
+        assert_eq!(handler.get_request(0).unwrap().status, RequestStatus::PENDING);
+        handler.approve_request(0);
+        assert_eq!(handler.get_request(0).unwrap().status, RequestStatus::APPROVED);
+        assert_eq!( handler.get_all_votes(0).len(), 0);
     }
 }
 

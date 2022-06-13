@@ -3,18 +3,19 @@ extern crate core;
 
 use std::vec;
 
-use near_sdk::{AccountId, Balance, env, near_bindgen, Promise};
+use near_sdk::{AccountId, Balance, env, near_bindgen, Promise, Timestamp};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet, Vector};
+use near_sdk::collections::{LookupMap, UnorderedMap};
 use near_sdk::json_types::U128;
 use num_traits::cast::ToPrimitive;
 
 use orderbook::{Failed, Order, Orderbook, orders, OrderSide, OrderType, Success};
 
 use crate::account::TokenAccount;
-use crate::ballot::{BallotHandler, StakeInfo, UserRequest};
+use crate::ballot::{BallotHandler, LaunchPad, StakeInfo, UserRequest};
 use crate::request::{Request, RequestId, Vote};
-use crate::token::{Token, TokenId};
+use crate::request::RequestStatus::APPROVED;
+use crate::token::{Token, TokenId, TokenMetadata};
 use crate::wallet::TokenWallet;
 
 mod account;
@@ -44,8 +45,8 @@ pub struct Contract {
     /// разрешенные токены
     pub tokens: UnorderedMap<TokenId, Token>,
     pub ballot_handler: BallotHandler,
-    pub staking: LookupMap<Vec<u8>, StakeInfo>,
-
+    pub staking: UnorderedMap<Vec<u8>, StakeInfo>,
+    pub launchpad: UnorderedMap<TokenId, LaunchPad>,
     /// владелец контракта
     owner_id: AccountId,
 }
@@ -68,12 +69,16 @@ impl Contract {
             tokens: UnorderedMap::new(b"t".to_vec()),
             ballot_handler: BallotHandler::new(),
             owner_id: owner_id.clone(),
-            staking: LookupMap::new(b"s".to_vec()),
+            staking: UnorderedMap::new(b"s".to_vec()),
+            launchpad: UnorderedMap::new(b"launch".to_vec()),
         };
         contract.add_token(Token {
             token_id: "XDHO".to_string(),
             owner_id: owner_id.clone(),
             supply: 100_000_000_000,
+            meta: None,
+            launched: true,
+            launched_time: env::block_timestamp(),
         });
 
         contract
@@ -252,6 +257,22 @@ impl Contract {
         });
     }
 
+    pub fn get_all_staked(&self) -> Balance {
+        let mut result: Balance = 0;
+        for stakeInfo in self.staking.values() {
+            result += stakeInfo.staked;
+        }
+        result
+    }
+
+    pub fn get_count_stakers(&self) -> i32 {
+        let mut result: i32 = 0;
+        for stakeInfo in self.staking.values() {
+            result += 1
+        }
+        result
+    }
+
     pub fn unstake(&mut self) {
         let old_staking = self.get_staking(env::predecessor_account_id());
         if old_staking.staked == 0 {
@@ -271,7 +292,7 @@ impl Contract {
     }
 
     pub fn add_new_request(&mut self, request: UserRequest) {
-        if self.tokens.get(&request.token_id).is_some(){
+        if self.tokens.get(&request.token_id).is_some() {
             env::panic(b"A token with this ID already exists");
         }
 
@@ -284,15 +305,10 @@ impl Contract {
     }
 
     pub fn vote(&mut self, request_id: RequestId, vote: bool) {
-        let request = self.ballot_handler.get_request(request_id);
-        match request {
-            None => env::panic(b"There is no request with this id"),
-            Some(req) => {
-                if req.created_time + VOTING_TIME < env::block_timestamp(){
-                    //TODO: финализировать тута
-                    env::panic(b"The voting has already ended");
-                }
-            },
+        let request = self.get_request(request_id);
+        if request.created_time + VOTING_TIME < env::block_timestamp() {
+            //TODO: финализировать тута
+            env::panic(b"The voting has already ended");
         }
         let staked = self.get_staking(env::predecessor_account_id());
         if staked.staked == 0 {
@@ -304,22 +320,119 @@ impl Contract {
         self.ballot_handler.vote(request_id, vote);
     }
 
+    pub fn get_request(&self, request_id: RequestId) -> Request {
+        let request = self.ballot_handler.get_request(request_id);
+        if request.is_none() {
+            env::panic(b"There is no request with this id");
+        }
+        request.unwrap()
+    }
+
     pub fn is_voting(&self, voter_id: AccountId, request_id: RequestId) -> bool {
         self.ballot_handler.is_vote(request_id, voter_id)
     }
 
     pub fn finalize(&mut self, request_id: RequestId) {
-        let request = self.ballot_handler.get_request(request_id);
-        match request {
-            None => env::panic(b"There is no request with this id"),
-            Some(req) => {
-                if req.created_time + VOTING_TIME > env::block_timestamp(){
-                    env::panic(b"The voting is not over yet");
+        let mut request = self.get_request(request_id);
+        if request.created_time + VOTING_TIME > env::block_timestamp() {
+            env::panic(b"The voting is not over yet");
+        }
+        // время вышло
+        let votes = self.ballot_handler.get_all_votes(request_id);
+        let count_stakers: i32 = self.get_count_stakers();
+
+        // голосов меньше, чем 1/3
+        if count_stakers / 3 > votes.len().try_into().unwrap() {
+            self.reject_request(request_id);
+        } else {
+            let mut positive_count = 0;
+            for vote in votes {
+                if vote.result {
+                    positive_count += 1;
                 }
-            },
+            }
+            if positive_count > count_stakers / 2 {
+                self.reject_request(request_id);
+            } else {
+                self.approve_request(request_id);
+            }
+        }
+    }
+
+    /// создает новый токен, продажи, которого начнутся в запланированное время
+    pub fn start_launchpad(&mut self, request_id: RequestId, launched_time: Timestamp) {
+        let request = self.get_request(request_id);
+        if request.owner_id != env::predecessor_account_id() {
+            env::panic(b"To start the launchpad, you need to be the creator of the request")
+        }
+        if request.status != APPROVED {
+            env::panic(b"To start the launchpad, the request must be approved by a vote.")
+        }
+        let token = Token {
+            token_id: request.token_id,
+            owner_id: request.owner_id,
+            supply: request.supply,
+            launched: false,
+            meta: Some(TokenMetadata {
+                title: Some(request.title),
+                description: Some(request.description),
+                //TODO: поменять на картиночку
+                icon: Some(request.hash),
+            }),
+            launched_time,
+        };
+
+        self.insert_launchpad_tokens(&LaunchPad {
+            price: request.price,
+            sell_supply: 0,
+            launched_time,
+            token,
+        })
+    }
+
+    fn reject_request(&mut self, request_id: RequestId) {
+        self.ballot_handler.reject_request(request_id);
+    }
+
+    fn approve_request(&mut self, request_id: RequestId) {
+        self.ballot_handler.approve_request(request_id);
+    }
+
+    pub fn get_launchpad_tokens(&self) -> Vec<LaunchPad> {
+        let mut result: Vec<LaunchPad> = Vec::new();
+        for token in self.launchpad.values() {
+            result.push(token);
+        }
+        result
+    }
+
+    pub fn buy_tokens_on_launchpad(&mut self, token_id: TokenId, amount: Balance) {
+        let launchpad = self.launchpad.get(&token_id);
+        if launchpad.is_none(){
+            env::panic(b"This token is not on the launchpad");
+        }
+        let mut launchpad = launchpad.unwrap();
+        if launchpad.launched_time < env::block_timestamp(){
+            env::panic(b"The launchpad of this token has not started yet");
         }
 
+        self.transfer(
+            launchpad.token.owner_id.clone(),
+            self.get_standard_token(),
+            U128(launchpad.price * amount)
+        );
 
+        let mut account = self.get_account(&env::predecessor_account_id(), token_id.clone());
+        account.balance += amount;
+        self.set_account(&env::predecessor_account_id(), &account, &token_id);
+
+        launchpad.sell_supply += amount;
+        self.insert_launchpad_tokens(&launchpad);
+
+    }
+
+    pub fn insert_launchpad_tokens(&mut self, launchPad: &LaunchPad) {
+        self.launchpad.insert(&launchPad.token.token_id, launchPad);
     }
 }
 
@@ -335,7 +448,7 @@ impl Contract {
 
     #[private]
     pub fn add_token(&mut self, token: Token) {
-        self.tokens.insert(&token.token_id,&token);
+        self.tokens.insert(&token.token_id, &token);
         let token_id = token.token_id;
         let owner_id = &token.owner_id;
         let mut account = self.get_account(owner_id, token_id.clone());
@@ -791,6 +904,9 @@ mod tests {
             token_id: "XDHO".to_string(),
             owner_id: carol().to_string(),
             supply: 100_000_000_000,
+            launched: true,
+            meta: None,
+            launched_time: env::block_timestamp(),
         }
     }
 
@@ -799,6 +915,9 @@ mod tests {
             token_id: "TEST".to_string(),
             owner_id: bob(),
             supply: 10000,
+            launched: true,
+            meta: None,
+            launched_time: env::block_timestamp(),
         }
     }
 
@@ -871,15 +990,15 @@ mod tests {
         contract
     }
 
-    fn get_contract_with_request() -> Contract{
+    fn get_contract_with_request() -> Contract {
         let mut contract = init_contract_with_tokens_and_limit_bids();
-        contract.add_new_request(UserRequest{
+        contract.add_new_request(UserRequest {
             token_id: "SOSI".to_string(),
             title: "Тестовое название".to_string(),
             description: "ПРИВЕТИКИ".to_string(),
             price: 23,
             supply: 100000,
-            hash: "сосисочка".to_string()
+            hash: "сосисочка".to_string(),
         });
         contract
     }
@@ -1033,6 +1152,9 @@ mod tests {
             token_id: test_token().token_id,
             supply: test_token().supply,
             owner_id: carol(),
+            meta: None,
+            launched: true,
+            launched_time: env::block_timestamp(),
         });
         let balance = contract
             .get_balance(carol(), test_token().token_id)
@@ -1202,7 +1324,6 @@ mod tests {
         let mut contract = init_contract_with_tokens_and_limit_bids();
         let context = get_extend_context(ivan(), ivan());
         testing_env!(context);
-
 
         assert_eq!(contract.get_balance(ivan(), standart_token().token_id).0, 1000u128);
         assert_eq!(contract.get_balance(bob(), test_token().token_id).0, 5900u128);

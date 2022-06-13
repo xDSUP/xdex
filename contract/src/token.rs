@@ -1,6 +1,6 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::serde::{Deserialize, Serialize};
-use near_sdk::{AccountId, Balance};
+use near_sdk::{AccountId, Balance, Timestamp};
 
 pub type TokenId = String;
 
@@ -19,7 +19,12 @@ pub struct Token {
     pub token_id: TokenId,
     pub owner_id: AccountId,
     pub supply: Balance,
-    //pub meta: LazyOption<TokenMetadata>,
+    pub meta: Option<TokenMetadata>,
+
+    /// запущен на вторичный рынок или нет
+    pub launched: bool,
+    /// время первых торгов
+    pub launched_time: Timestamp,
 }
 
 impl PartialEq for Token{
