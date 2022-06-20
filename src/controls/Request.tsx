@@ -3,8 +3,9 @@ import React, {useState} from "react";
 import axios from "axios";
 import MDEditor from "@uiw/react-md-editor";
 import rehypeSanitize from "rehype-sanitize";
+import {TokenRequest} from "../contract/contract";
 
-export interface TokenRequest {
+export interface TokenRequestOld {
     id: number
     token_id: string;
     title: string;
@@ -20,15 +21,15 @@ export const Request = observer((props: { request: TokenRequest }) => {
     const [text, setText] = useState("");
     const request = props.request;
 
-    const url = `https://ipfs.infura.io/ipfs/${request.info}`;
+    const url = `https://ipfs.infura.io/ipfs/${request.hash}`;
     axios.get(url, {responseType: "text"})
         .then(info => {
             setLoading(false);
             setText(info.data);
         });
 
-    return <div className={"col-12 md:col-6"}>
-        <div className={"card"}>
+    return <div className={""}>
+        <div className={"card"} style={{maxHeight: "500px", overflowY: "auto"}}>
             <div className={"flex flex-row justify-content-between"}>
                 <h4>{`${request.title} ($${request.token_id}) №${request.id}`}</h4>
                 <div className={"flex flex-column"}>

@@ -1,6 +1,6 @@
 use near_sdk::{AccountId, Balance, env, Timestamp};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::serde::{Serialize};
+use near_sdk::serde::{Serialize, Deserialize};
 use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet};
 
 use orderbook::{new_sequence_gen, TradeSequence};
@@ -16,13 +16,13 @@ pub struct BallotHandler {
     seq: TradeSequence,
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
 pub struct StakeInfo {
     pub staked: Balance,
     pub created_time: Timestamp
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
 pub struct LaunchPad {
     pub price: Balance,
     /// продано
@@ -32,7 +32,7 @@ pub struct LaunchPad {
 }
 
 
-#[derive(Serialize)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize)]
 pub struct UserRequest {
     pub token_id: String,
     pub title: String,

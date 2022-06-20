@@ -10,7 +10,9 @@ import 'primereact/resources/primereact.css';
 import 'primeicons/primeicons.css';
 import 'primeflex/primeflex.css';
 import './css/main.css';
-import {IPFSGlobalContext} from "react-ipfs/dist/types";
+import {configure} from "mobx";
+
+configure({ enforceActions: "observed" });
 
 export interface Store {
     nearContext: NearContext,

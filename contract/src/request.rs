@@ -1,12 +1,14 @@
-use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::serde::{Serialize};
 use near_sdk::{AccountId, Balance, Timestamp};
+use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use near_sdk::serde::Serialize;
 
 #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, Serialize, PartialEq)]
-pub enum RequestStatus{
+pub enum RequestStatus {
     REJECTED,
     APPROVED,
-    PENDING
+    PENDING,
+    LAUNCHED,
+    TRADED,
 }
 
 pub type RequestId = u64;
@@ -16,10 +18,10 @@ pub type RequestId = u64;
 #[serde(crate = "near_sdk::serde")]
 pub struct Vote {
     pub owner_id: AccountId,
-    pub result: bool
+    pub result: bool,
 }
 
-impl PartialEq for Vote{
+impl PartialEq for Vote {
     fn eq(&self, other: &Self) -> bool {
         self.owner_id == other.owner_id
     }

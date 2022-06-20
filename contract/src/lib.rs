@@ -14,7 +14,7 @@ use orderbook::{Failed, Order, Orderbook, orders, OrderSide, OrderType, Success}
 use crate::account::TokenAccount;
 use crate::ballot::{BallotHandler, LaunchPad, StakeInfo, UserRequest};
 use crate::request::{Request, RequestId, Vote};
-use crate::request::RequestStatus::APPROVED;
+use crate::request::RequestStatus;
 use crate::token::{Token, TokenId, TokenMetadata};
 use crate::wallet::TokenWallet;
 
@@ -30,6 +30,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 const NANOSEC_IN_DAY: u64 = 86_400_000_000_000;
 const NANOSEC_IN_DAY_F64: f64 = 86_400_000_000_000.0;
 const PERCENT_STAKING_PER_YEAR: f64 = 0.20;
+const YOKTO_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 const STAKING_PERCENT: f64 = PERCENT_STAKING_PER_YEAR / 365.0 / NANOSEC_IN_DAY_F64;
 /// за наносекунду
 const VOTING_TIME: u64 = NANOSEC_IN_DAY;
@@ -77,8 +78,6 @@ impl Contract {
             owner_id: owner_id.clone(),
             supply: 100_000_000_000,
             meta: None,
-            launched: true,
-            launched_time: env::block_timestamp(),
         });
 
         contract
@@ -209,17 +208,24 @@ impl Contract {
 impl Contract {
     #[payable]
     pub fn pay_standard_token(&mut self, amount: U128, to: AccountId) -> Promise {
-        self.transfer_from(
+        if(env::account_balance() < amount.0 * YOKTO_NEAR){
+            env::panic(b"Not enough NEAR balance");
+        }
+        if(env::attached_deposit() < amount.0 * YOKTO_NEAR){
+            env::panic(b"Not enough attached NEAR");
+        }
+        self.transfer_from_user(
             self.owner_id.clone(),
             to.clone(),
             self.get_standard_token(),
             U128::from(self.get_standard_price() * amount.0),
         );
-        Promise::new(to).transfer(amount.0)
+
+        Promise::new(self.owner_id.clone()).transfer((amount.0 * YOKTO_NEAR).to_u128().unwrap())
     }
 
     pub fn get_standard_price(&self) -> Balance {
-        52u128 // монет за один NEAR
+        97u128 // монет за один NEAR
     }
 }
 
@@ -304,6 +310,10 @@ impl Contract {
         self.ballot_handler.get_all_requests()
     }
 
+    pub fn get_all_votes(&self, request_id: RequestId) -> Vec<Vote>{
+        self.ballot_handler.get_all_votes(request_id)
+    }
+
     pub fn vote(&mut self, request_id: RequestId, vote: bool) {
         let request = self.get_request(request_id);
         if request.created_time + VOTING_TIME < env::block_timestamp() {
@@ -333,7 +343,7 @@ impl Contract {
     }
 
     pub fn finalize_request(&mut self, request_id: RequestId) {
-        let mut request = self.get_request(request_id);
+        let request = self.get_request(request_id);
         if request.created_time + VOTING_TIME > env::block_timestamp() {
             env::panic(b"The voting is not over yet");
         }
@@ -370,26 +380,28 @@ impl Contract {
 
     /// создает новый токен, продажи, которого начнутся в запланированное время
     pub fn start_launchpad(&mut self, request_id: RequestId, launched_time: Timestamp) {
-        let request = self.get_request(request_id);
+        let mut request = self.get_request(request_id);
         if request.owner_id != env::predecessor_account_id() {
             env::panic(b"To start the launchpad, you need to be the creator of the request")
         }
-        if request.status != APPROVED {
+        if request.status != RequestStatus::APPROVED {
             env::panic(b"To start the launchpad, the request must be approved by a vote.")
         }
         let token = Token {
             token_id: request.token_id,
             owner_id: request.owner_id,
             supply: request.supply,
-            launched: false,
             meta: Some(TokenMetadata {
                 title: Some(request.title),
                 description: Some(request.description),
                 //TODO: поменять на картиночку
                 icon: Some(request.hash),
             }),
-            launched_time,
         };
+
+        request.status = RequestStatus::LAUNCHED
+
+        self.ballot_handler.requests.insert(&request_id, &request);
 
         self.insert_launchpad_tokens(&LaunchPad {
             price: request.price,
@@ -444,7 +456,7 @@ impl Contract {
     }
 
     pub fn finalize_my_launchpad(&mut self, token_id: TokenId) {
-        let mut launchpad = self.get_launchpad(token_id.clone());
+        let launchpad = self.get_launchpad(token_id.clone());
         println!("{} {}", launchpad.token.owner_id, env::predecessor_account_id());
         if launchpad.token.owner_id != env::predecessor_account_id() {
             env::panic(b"To end the launchpad, you need to be the creator of the launchpad")
@@ -454,7 +466,7 @@ impl Contract {
     }
 
     fn finalize_launchpad(&mut self, token_id: TokenId) {
-        let mut launchpad = self.get_launchpad(token_id.clone());
+        let launchpad = self.get_launchpad(token_id.clone());
 
         let excess = launchpad.token.supply - launchpad.sell_supply;
         let owner_launchpad = launchpad.token.owner_id.clone();
@@ -547,11 +559,11 @@ fn get_current_time() -> u64 {
 
 #[near_bindgen]
 impl Contract {
-    pub fn new_ask_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128) {
+    pub fn new_ask_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128) -> Vec<Result<Success, Failed>> {
         self.new_limit_order(token_id, price, quantity, "Ask".to_string())
     }
 
-    pub fn new_bid_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128) {
+    pub fn new_bid_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128) -> Vec<Result<Success, Failed>> {
         self.new_limit_order(token_id, price, quantity, "Bid".to_string())
     }
 
@@ -559,7 +571,7 @@ impl Contract {
     /// * 'side':
     /// Ask - заявка на продажу
     /// Bid - заявка на покупку
-    pub fn new_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128, side: String) {
+    pub fn new_limit_order(&mut self, token_id: TokenId, price: f64, quantity: u128, side: String) -> Vec<Result<Success, Failed>> {
         let side = parse_side(side.as_str()).unwrap();
         let token = match side {
             OrderSide::Bid => self.get_standard_token(),
@@ -603,11 +615,11 @@ impl Contract {
             token,
             U128(amount),
         );
-        self.post_transfer(token_id, price, quantity, side);
+        self.post_transfer(token_id, price, quantity, side)
     }
 
     #[private]
-    fn post_transfer(&mut self, token_id: TokenId, price: f64, quantity: u128, side: OrderSide) {
+    fn post_transfer(&mut self, token_id: TokenId, price: f64, quantity: u128, side: OrderSide) -> Vec<Result<Success, Failed>> {
         env::log(b"Token Transfer Successful.");
         let order = orders::new_limit_order_request(
             token_id.clone(),
@@ -623,14 +635,14 @@ impl Contract {
         let res = order_book.process_order(order);
         self.order_books.insert(&token_id, &order_book);
 
-        self.process_orderbook_result(token_id, res);
+        self.process_orderbook_result(token_id, res)
     }
 
     /// Создает новый рыночный ордер:
     /// * 'side':
     /// Ask - заявка на продажу
     /// Bid - заявка на покупку
-    pub fn new_market_order(&mut self, token_id: TokenId, quantity: u128, side: String) {
+    pub fn new_market_order(&mut self, token_id: TokenId, quantity: u128, side: String) -> Vec<Result<Success, Failed>> {
         let side = parse_side(side.as_str()).unwrap();
         println!(
             "New рыночн order на {} {} ${} от signer: {}",
@@ -669,7 +681,7 @@ impl Contract {
         let res = order_book.process_order(order);
         self.order_books.insert(&token_id.clone(), &order_book);
 
-        self.process_orderbook_result(token_id, res);
+        self.process_orderbook_result(token_id, res)
     }
 
     pub fn cancel_limit_order(
@@ -698,22 +710,6 @@ impl Contract {
             None => env::panic(b"OrderBook not init!"),
         }
     }
-
-    /**
-    pub fn get_all_orders(&self, account_id: AccountId) -> Vec<Order> {
-        let orders = Vec::new();
-        for token in self.tokens {
-            let order_book = self.order_books.get(&token.token_id);
-            orders.push(order_book.)
-                    }
-
-                match order_book {
-            Some(t) => (t.get_orders(account_id, side)),
-            None => panic(b"OrderBook not init!"),
-        }
-
-            }
-     */
 
     pub fn get_bid_orders(&self, token_id: TokenId) -> Vec<Order> {
         let order_book = self.order_books.get(&token_id).unwrap();
@@ -919,13 +915,6 @@ impl Contract {
             "Only contract owner can sign transactions for this method."
         );
     }
-
-    fn _only_our_token(&mut self, token_id: TokenId) {
-        //self.tokens
-        //assert!(self.tok
-        //    "Only contract owner can sign transactions for this method."
-        //);
-    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -936,7 +925,7 @@ mod tests {
     use near_sdk::json_types::U128;
     use num_traits::ToPrimitive;
 
-    use crate::{APPROVED, Contract, NANOSEC_IN_DAY, PERCENT_STAKING_PER_YEAR, Token, UserRequest};
+    use crate::{APPROVED, Contract, NANOSEC_IN_DAY, PERCENT_STAKING_PER_YEAR, Token, UserRequest, YOKTO_NEAR};
     use crate::request::RequestStatus::REJECTED;
 
     fn standart_token() -> Token {
@@ -944,9 +933,7 @@ mod tests {
             token_id: "XDHO".to_string(),
             owner_id: carol().to_string(),
             supply: 100_000_000_000,
-            launched: true,
             meta: None,
-            launched_time: env::block_timestamp(),
         }
     }
 
@@ -955,9 +942,7 @@ mod tests {
             token_id: "TEST".to_string(),
             owner_id: bob(),
             supply: 10000,
-            launched: true,
             meta: None,
-            launched_time: env::block_timestamp(),
         }
     }
 
@@ -1162,8 +1147,6 @@ mod tests {
         let mut contract = get_contract_with_request();
         let context = get_extend_context(carol(), carol());
         testing_env!(context);
-        let amount = 100;
-        let old_balance = contract.get_balance(carol(), standart_token().token_id);
         catch_unwind_silent(move || {
             contract.vote(0, true);
         }).unwrap_err();
@@ -1175,7 +1158,6 @@ mod tests {
         let context = get_extend_context(carol(), carol());
         testing_env!(context);
         let amount = 100;
-        let old_balance = contract.get_balance(carol(), standart_token().token_id);
         contract.stake(amount);
         contract.vote(0, true);
         assert!(contract.is_voting(carol(), 0));
@@ -1198,7 +1180,7 @@ mod tests {
 
     #[test]
     fn test_request_approve() {
-        let mut contract = get_contract_with_approve_request();
+        let contract = get_contract_with_approve_request();
         assert_eq!(contract.get_request(0).status, APPROVED);
     }
 
@@ -1226,7 +1208,7 @@ mod tests {
         context.block_timestamp = NANOSEC_IN_DAY + 100;
         testing_env!(context);
         contract.buy_tokens_on_launchpad(get_test_request().token_id, 50);
-        let mut context = get_extend_context(carol(), carol());
+        let context = get_extend_context(carol(), carol());
         testing_env!(context);
         assert_eq!(contract.get_balance(carol(), get_test_request().token_id).0, 0);
         contract.finalize_my_launchpad(get_test_request().token_id);
@@ -1240,7 +1222,7 @@ mod tests {
         let pads = contract.get_launchpad_tokens();
         assert_eq!(pads[0].price, 23);
         assert_eq!(pads[0].token.token_id, get_test_request().token_id);
-        let mut context = get_extend_context(bob(), bob());
+        let context = get_extend_context(bob(), bob());
         testing_env!(context);
         catch_unwind_silent(move || {
             contract.buy_tokens_on_launchpad(get_test_request().token_id, 50);
@@ -1286,16 +1268,19 @@ mod tests {
 
     #[test]
     fn test_pay() {
-        let context = get_context(carol());
+        let mut context = get_context(carol());
+        context.account_balance *= YOKTO_NEAR;
         testing_env!(context);
         let mut contract = Contract::new(carol());
 
-        contract.pay_standard_token(U128(3), bob());
-        assert_eq!(env::account_balance(), 97);
+        let oldBalance = env::account_balance();
+        let amount = 3;
+        contract.pay_standard_token(U128(amount), bob());
+        assert_eq!(env::account_balance(), oldBalance - amount * YOKTO_NEAR);
         let balance = contract
             .get_balance(bob(), standart_token().token_id)
             .0;
-        assert_eq!(balance, 156u128);
+        assert_eq!(balance, contract.get_standard_price() * amount);
     }
 
     #[test]
@@ -1322,8 +1307,6 @@ mod tests {
             supply: test_token().supply,
             owner_id: carol(),
             meta: None,
-            launched: true,
-            launched_time: env::block_timestamp(),
         });
         let balance = contract
             .get_balance(carol(), test_token().token_id)
@@ -1519,6 +1502,10 @@ mod tests {
         testing_env!(context);
 
         contract.cancel_limit_order(test_token().token_id, 6, "Bid".to_string());
+        contract.cancel_limit_order(test_token().token_id, 5, "Bid".to_string());
+        contract.cancel_limit_order(test_token().token_id, 4, "Bid".to_string());
+        contract.cancel_limit_order(test_token().token_id, 3, "Bid".to_string());
+        contract.cancel_limit_order(test_token().token_id, 2, "Bid".to_string());
 
         let spread = contract.get_current_spread(test_token().token_id);
         println!("Spread => Ask: {}, Bid: {}", spread[0], spread[1]);
